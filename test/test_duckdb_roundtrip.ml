@@ -82,3 +82,60 @@ let%expect_test "values round trip" =
     9,7000000000000,10.5,ETH,,2023-11-14 22:13:20.000000009,6.1105,true,1700000000000000009
     |}]
 ;;
+
+let%expect_test "row groups carry min/max statistics" =
+  Duckdb.with_parquet_file (fun file ->
+    write file ~row_group_rows:4 (List.init 10 ~f:row);
+    Duckdb.query
+      ~file
+      {|select row_group_id, row_group_num_rows, path_in_schema, stats_min_value, stats_max_value
+        from parquet_metadata($file)
+        where path_in_schema in ('id', 'px', 'coin', 'notional')
+        order by row_group_id, column_id|});
+  [%expect
+    {|
+    row_group_id,row_group_num_rows,path_in_schema,stats_min_value,stats_max_value
+    0,4,id,0,3
+    0,4,px,-3.0,1.5
+    0,4,coin,BTC,"héllo"
+    0,4,notional,-5.0000,-1.2965
+    1,4,id,4,7
+    1,4,px,3.0,7.5
+    1,4,coin,BTC,"héllo"
+    1,4,notional,-0.0620,3.6415
+    2,2,id,8,9
+    2,2,px,9.0,10.5
+    2,2,coin,BTC,ETH
+    2,2,notional,4.8760,6.1105
+    |}]
+;;
+
+let%expect_test "zstd compressed pages" =
+  Duckdb.with_parquet_file (fun file ->
+    write file ~compression:`Zstd ~row_group_rows:3 (List.init 10 ~f:row);
+    Duckdb.query ~file "select distinct compression from parquet_metadata($file)";
+    Duckdb.query
+      ~file
+      "select count(*), sum(id), sum(notional), string_agg(coin, '' order by id) from \
+       $file");
+  [%expect
+    {|
+    compression
+    ZSTD
+    count_star(),sum(id),sum(notional),"string_agg(coin, '' ORDER BY id)"
+    10,45,5.5525,"BTCETHSOLhélloBTCETHSOLhélloBTCETH"
+    |}]
+;;
+
+let%expect_test "a file without rows" =
+  Duckdb.with_parquet_file (fun file ->
+    write file [];
+    Duckdb.query ~file "select count(*) from $file";
+    Duckdb.query ~file "select num_rows, num_row_groups from parquet_file_metadata($file)");
+  [%expect {|
+    count_star()
+    0
+    num_rows,num_row_groups
+    0,0
+    |}]
+;;
