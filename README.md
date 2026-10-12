@@ -112,3 +112,9 @@ group sizes and compression.
 - `lib/encoding.ml`: PLAIN encoders.
 - `lib/schema.ml`: typed column combinators.
 - `lib/writer.ml`: row groups, pages, statistics, compression, footer.
+
+## CI
+
+CI installs the opam dependencies through the shared
+[ox-setup](https://github.com/winterchill-trading/infra/blob/main/docs/ci.md) action, which
+caches the built opam switch between runs.
