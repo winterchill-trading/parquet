@@ -1,12 +1,7 @@
 open! Core
 module T = Parquet.Thrift_compact
 
-let hex s =
-  String.to_list s
-  |> List.map ~f:(fun c -> sprintf "%02x" (Char.to_int c))
-  |> String.concat ~sep:" "
-  |> print_endline
-;;
+let hex = Hex.print
 
 let%expect_test "zigzag examples from the spec" =
   List.iter
