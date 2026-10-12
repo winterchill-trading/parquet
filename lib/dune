@@ -1,0 +1,6 @@
+(library
+ (name parquet)
+ (public_name parquet)
+ (libraries core)
+ (preprocess
+  (pps ppx_jane)))
