@@ -1,0 +1,10 @@
+(executable
+ (name bench)
+ (libraries
+  core
+  core_unix
+  core_unix.sys_unix
+  core_unix.filename_unix
+  parquet)
+ (preprocess
+  (pps ppx_jane)))
