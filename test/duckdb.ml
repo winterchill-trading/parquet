@@ -9,6 +9,21 @@ let with_parquet_file f =
       Core_unix.rmdir dir)
 ;;
 
+let capture : Buffer.t option ref = ref None
+
+let emit s =
+  match !capture with
+  | Some buf -> Buffer.add_string buf s
+  | None -> print_string s
+;;
+
+let with_output f =
+  let buf = Buffer.create 256 in
+  capture := Some buf;
+  Exn.protect ~f ~finally:(fun () -> capture := None);
+  Buffer.contents buf
+;;
+
 let query ~file sql =
   let sql = String.substr_replace_all sql ~pattern:"$file" ~with_:(sprintf "'%s'" file) in
   let command = sprintf "duckdb -csv -c %s 2>&1" (Filename.quote sql) in
@@ -16,6 +31,6 @@ let query ~file sql =
   let output = In_channel.input_all ic in
   (match Core_unix.close_process_in ic with
    | Ok () -> ()
-   | Error _ -> print_endline "(duckdb exited with an error)");
-  print_string output
+   | Error _ -> emit "(duckdb exited with an error)\n");
+  emit output
 ;;

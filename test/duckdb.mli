@@ -9,3 +9,6 @@ val with_parquet_file : (string -> 'a) -> 'a
 (** Run [sql] with [duckdb -csv] and print its output (stdout and stderr). Every [$file]
     in [sql] is replaced by the quoted [file]. *)
 val query : file:string -> string -> unit
+
+(** Capture what [f] prints with {!query} instead of printing it. *)
+val with_output : (unit -> unit) -> string
