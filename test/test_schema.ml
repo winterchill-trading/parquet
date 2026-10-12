@@ -30,7 +30,7 @@ let%expect_test "schema elements" =
      (logical_type ()))
     ((type_ (Int64)) (type_length ()) (repetition_type (Required)) (name ts)
      (num_children ()) (converted_type ()) (scale ()) (precision ())
-     (logical_type ((Timestamp (is_adjusted_to_utc true) (unit Nanos)))))
+     (logical_type ((Timestamp (is_adjusted_to_utc false) (unit Nanos)))))
     ((type_ (Byte_array)) (type_length ()) (repetition_type (Required))
      (name coin) (num_children ()) (converted_type (Utf8)) (scale ())
      (precision ()) (logical_type (String)))

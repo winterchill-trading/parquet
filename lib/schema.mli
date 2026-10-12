@@ -23,8 +23,14 @@ module Column : sig
   (** Raw [BYTE_ARRAY]. *)
   val bytes : string -> ('a -> string) -> 'a t
 
-  (** [INT64] with logical type [TIMESTAMP(NANOS, isAdjustedToUTC=true)]. *)
-  val timestamp_ns : string -> ('a -> Time_ns.t) -> 'a t
+  (** [INT64] nanoseconds since the epoch with logical type
+      [TIMESTAMP(NANOS, isAdjustedToUTC)].
+
+      [adjusted_to_utc] defaults to [false]. DuckDB reads [isAdjustedToUTC=true] as
+      [TIMESTAMP WITH TIME ZONE], which has microsecond resolution, and silently drops the
+      nanoseconds; with [false] it reads [TIMESTAMP_NS] and keeps them. The stored
+      integers are the same either way. *)
+  val timestamp_ns : ?adjusted_to_utc:bool -> string -> ('a -> Time_ns.t) -> 'a t
 
   (** [INT64] with logical type [DECIMAL(precision, scale)]. The accessor returns the
       unscaled value: [12.34] at scale 2 is [1234]. Requires [1 <= precision <= 18] and

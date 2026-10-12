@@ -41,12 +41,12 @@ module Column = struct
 
   let bytes name f = leaf name Byte_array (Byte_array f)
 
-  let timestamp_ns name f =
+  let timestamp_ns ?(adjusted_to_utc = false) name f =
     leaf
       name
       Int64
       (Int64 (fun row -> Time_ns.to_int_ns_since_epoch (f row)))
-      ~logical_type:(Timestamp { is_adjusted_to_utc = true; unit = Nanos })
+      ~logical_type:(Timestamp { is_adjusted_to_utc = adjusted_to_utc; unit = Nanos })
   ;;
 
   let decimal ~precision ~scale name f =
