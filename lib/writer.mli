@@ -9,8 +9,14 @@ open! Core
 type 'a t
 
 (** [create ~schema path] creates (or truncates) [path] and writes the leading magic
-    bytes. [row_group_rows] defaults to 1_048_576. *)
-val create : schema:'a Schema.t -> ?row_group_rows:int -> string -> 'a t
+    bytes. [row_group_rows] defaults to 1_048_576. [compression] defaults to [`None];
+    [`Zstd] compresses each page at zstd level 3. *)
+val create
+  :  schema:'a Schema.t
+  -> ?row_group_rows:int
+  -> ?compression:[ `None | `Zstd ]
+  -> string
+  -> 'a t
 
 val add : 'a t -> 'a -> unit
 val add_all : 'a t -> 'a list -> unit
@@ -26,6 +32,7 @@ val close : _ t -> unit
 val with_file
   :  schema:'a Schema.t
   -> ?row_group_rows:int
+  -> ?compression:[ `None | `Zstd ]
   -> string
   -> f:('a t -> 'b)
   -> 'b

@@ -3,6 +3,7 @@ module M = Metadata
 
 let magic = "PAR1"
 let created_by = "parquet-ocaml version 0.1.0"
+let zstd_level = 3
 
 (* Per-column buffer for the current row group, with running statistics. *)
 module Chunk = struct
@@ -133,6 +134,7 @@ type 'a t =
   ; columns : 'a Schema.Column.t array
   ; chunks : 'a Chunk.t array
   ; row_group_rows : int
+  ; compression : [ `None | `Zstd ]
   ; out : Out_channel.t
   ; mutable pos : int
   ; mutable rows_in_group : int
@@ -146,7 +148,7 @@ let output t s =
   t.pos <- t.pos + String.length s
 ;;
 
-let create ~schema ?(row_group_rows = 1_048_576) path =
+let create ~schema ?(row_group_rows = 1_048_576) ?(compression = `None) path =
   if row_group_rows < 1
   then raise_s [%message "Parquet.Writer.create: row_group_rows must be positive"];
   let columns = Array.of_list (Schema.columns schema) in
@@ -155,6 +157,7 @@ let create ~schema ?(row_group_rows = 1_048_576) path =
     ; columns
     ; chunks = Array.map columns ~f:(fun c -> Chunk.create (Schema.Column.accessor c))
     ; row_group_rows
+    ; compression
     ; out = Out_channel.create ~binary:true path
     ; pos = 0
     ; rows_in_group = 0
@@ -169,11 +172,17 @@ let create ~schema ?(row_group_rows = 1_048_576) path =
 
 let write_column_chunk t column chunk ~num_rows : M.Column_chunk.t =
   let data, statistics = Chunk.finish chunk ~num_rows in
-  let size = String.length data in
+  let uncompressed_size = String.length data in
+  let (codec : M.Compression_codec.t), data =
+    match t.compression with
+    | `None -> Uncompressed, data
+    | `Zstd -> Zstd, Zstd.compress ~level:zstd_level data
+  in
+  let compressed_size = String.length data in
   let header : M.Page_header.t =
     { type_ = Data_page
-    ; uncompressed_page_size = size
-    ; compressed_page_size = size
+    ; uncompressed_page_size = uncompressed_size
+    ; compressed_page_size = compressed_size
     ; data_page_header =
         Some
           { num_values = num_rows
@@ -188,16 +197,16 @@ let write_column_chunk t column chunk ~num_rows : M.Column_chunk.t =
   let offset = t.pos in
   output t header;
   output t data;
-  let total = String.length header + size in
+  let header_size = String.length header in
   { file_offset = offset
   ; meta_data =
       { type_ = Schema.Column.physical_type column
       ; encodings = [ Plain ]
       ; path_in_schema = [ Schema.Column.name column ]
-      ; codec = Uncompressed
+      ; codec
       ; num_values = num_rows
-      ; total_uncompressed_size = total
-      ; total_compressed_size = total
+      ; total_uncompressed_size = header_size + uncompressed_size
+      ; total_compressed_size = header_size + compressed_size
       ; data_page_offset = offset
       ; statistics = Some statistics
       }
@@ -268,7 +277,7 @@ let close t =
     t.closed <- true)
 ;;
 
-let with_file ~schema ?row_group_rows path ~f =
-  let t = create ~schema ?row_group_rows path in
+let with_file ~schema ?row_group_rows ?compression path ~f =
+  let t = create ~schema ?row_group_rows ?compression path in
   Exn.protect ~f:(fun () -> f t) ~finally:(fun () -> close t)
 ;;
