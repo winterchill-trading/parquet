@@ -12,6 +12,7 @@ depends: [
   "core"
   "ppx_jane"
   "zstd"
+  "core_unix" {with-test}
   "odoc" {with-doc}
 ]
 build: [

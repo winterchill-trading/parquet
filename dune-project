@@ -13,4 +13,5 @@
   dune
   core
   ppx_jane
-  zstd))
+  zstd
+  (core_unix :with-test)))
