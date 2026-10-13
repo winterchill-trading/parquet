@@ -55,14 +55,15 @@ let write_both rows ~row_group_rows ~compression =
     In_channel.read_all file, In_channel.read_all reference)
 ;;
 
+let gen =
+  let open Quickcheck.Generator.Let_syntax in
+  let%map rows = Int.gen_incl 0 200 >>= fun n -> List.gen_with_length n gen_row
+  and row_group_rows = Int.gen_incl 1 64
+  and compression = Quickcheck.Generator.of_list [ `None; `Zstd ] in
+  rows, row_group_rows, compression
+;;
+
 let%expect_test "Writer and Reference_writer write identical bytes" =
-  let gen =
-    let open Quickcheck.Generator.Let_syntax in
-    let%map rows = Int.gen_incl 0 200 >>= fun n -> List.gen_with_length n gen_row
-    and row_group_rows = Int.gen_incl 1 64
-    and compression = Quickcheck.Generator.of_list [ `None; `Zstd ] in
-    rows, row_group_rows, compression
-  in
   Quickcheck.test
     gen
     ~trials:100
@@ -70,5 +71,47 @@ let%expect_test "Writer and Reference_writer write identical bytes" =
     ~f:(fun (rows, row_group_rows, compression) ->
       let actual, expect = write_both rows ~row_group_rows ~compression in
       [%test_result: string] actual ~expect);
+  [%expect {| |}]
+;;
+
+let write_direct rows ~row_group_rows ~compression file =
+  Writer.with_file ~schema ~row_group_rows ~compression file ~f:(fun w ->
+    let open Writer.Direct in
+    let i32 = int w "i32"
+    and i64 = int w "i64"
+    and d = float w "d"
+    and s = string w "s"
+    and raw = string w "raw"
+    and ts = int w "ts"
+    and dec = int w "dec"
+    and flag = bool w "flag" in
+    List.iteri rows ~f:(fun i r ->
+      (* Every other row goes through [Writer.add]; column order varies. *)
+      if i % 3 = 2
+      then Writer.add w r
+      else (
+        add_bool flag r.flag;
+        add_int dec r.dec;
+        add_int ts (Time_ns.to_int_ns_since_epoch r.ts);
+        add_string raw r.raw;
+        add_string s r.s;
+        add_float d r.d;
+        add_int i64 r.i64;
+        add_int i32 r.i32;
+        end_row w)))
+;;
+
+let%expect_test "Writer.Direct writes the bytes Reference_writer writes" =
+  Quickcheck.test
+    gen
+    ~trials:100
+    ~sexp_of:[%sexp_of: row list * int * [ `None | `Zstd ]]
+    ~f:(fun (rows, row_group_rows, compression) ->
+      Duckdb.with_parquet_file (fun file ->
+        let reference = file ^ ".reference" in
+        write_direct rows ~row_group_rows ~compression file;
+        Reference_writer.with_file ~schema ~row_group_rows ~compression reference ~f:(fun w ->
+          Reference_writer.add_all w rows);
+        [%test_result: string] (In_channel.read_all file) ~expect:(In_channel.read_all reference)));
   [%expect {| |}]
 ;;
