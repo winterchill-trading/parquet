@@ -39,6 +39,8 @@ let%expect_test "clear keeps the storage" =
   let bytes = Byte_buf.unsafe_bytes t in
   Byte_buf.clear t;
   Byte_buf.add_int64_le t 1;
-  print_s [%sexp (phys_equal bytes (Byte_buf.unsafe_bytes t) : bool), (Byte_buf.contents t : string)];
+  print_s
+    [%sexp
+      (phys_equal bytes (Byte_buf.unsafe_bytes t) : bool), (Byte_buf.contents t : string)];
   [%expect {| (true "\001\000\000\000\000\000\000\000") |}]
 ;;

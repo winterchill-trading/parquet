@@ -110,8 +110,14 @@ let%expect_test "Writer.Direct writes the bytes Reference_writer writes" =
       Duckdb.with_parquet_file (fun file ->
         let reference = file ^ ".reference" in
         write_direct rows ~row_group_rows ~compression file;
-        Reference_writer.with_file ~schema ~row_group_rows ~compression reference ~f:(fun w ->
-          Reference_writer.add_all w rows);
-        [%test_result: string] (In_channel.read_all file) ~expect:(In_channel.read_all reference)));
+        Reference_writer.with_file
+          ~schema
+          ~row_group_rows
+          ~compression
+          reference
+          ~f:(fun w -> Reference_writer.add_all w rows);
+        [%test_result: string]
+          (In_channel.read_all file)
+          ~expect:(In_channel.read_all reference)));
   [%expect {| |}]
 ;;

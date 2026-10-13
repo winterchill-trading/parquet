@@ -18,7 +18,8 @@ let%expect_test "column lookups check the name and the type" =
       show (fun () -> ignore (Writer.Direct.int w "missing" : Writer.Direct.int_column));
       show (fun () -> ignore (Writer.Direct.float w "n" : Writer.Direct.float_column));
       show (fun () -> ignore (Writer.Direct.int w "n" : Writer.Direct.int_column))));
-  [%expect {|
+  [%expect
+    {|
     (Error ("Parquet.Writer.Direct: no such column" (name missing)))
     (Error
      ("Parquet.Writer.Direct: column has another type" (name n) (kind float)))
@@ -36,7 +37,8 @@ let%expect_test "end_row needs one value per column" =
     Writer.Direct.add_float x 1.;
     Writer.Direct.add_float x 2.;
     show (fun () -> Writer.Direct.end_row w));
-  [%expect {|
+  [%expect
+    {|
     (Error
      ("Parquet.Writer.Direct.end_row: a column needs exactly one value per row"
       (name x) (values 0)))

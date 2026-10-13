@@ -1,5 +1,5 @@
-(* The writer as it was before the typed column builders, kept as the reference for
-   the byte-equality test in [test_bisimulation.ml]. *)
+(* The writer as it was before the typed column builders, kept as the reference for the
+   byte-equality test in [test_bisimulation.ml]. *)
 
 open! Core
 open Parquet

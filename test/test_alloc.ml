@@ -23,7 +23,10 @@ let schema =
       ]
 ;;
 
-let row = { ts = 1_700_000_000; coin = "BTC"; px = 60_000_000_000; sz = 0.25; is_buy = true }
+let row =
+  { ts = 1_700_000_000; coin = "BTC"; px = 60_000_000_000; sz = 0.25; is_buy = true }
+;;
+
 let n = 1_000
 
 let minor_words f =
@@ -48,8 +51,8 @@ let%expect_test "words per Writer.add" =
   [%expect {| 0 words for 1000 rows |}]
 ;;
 
-(* All words, including the major heap where column buffers grow and pages are copied,
-   for a whole file of one row group. *)
+(* All words, including the major heap where column buffers grow and pages are copied, for
+   a whole file of one row group. *)
 let total_words f =
   let s0 = Gc.quick_stat () in
   f ();

@@ -13,7 +13,8 @@ let%test_unit "same frames as Zstd.compress" =
   Quickcheck.test
     (Quickcheck.Generator.union
        [ String.quickcheck_generator
-       ; Int.gen_incl 0 100_000 |> Quickcheck.Generator.map ~f:(fun n -> String.make n 'a')
+       ; Int.gen_incl 0 100_000
+         |> Quickcheck.Generator.map ~f:(fun n -> String.make n 'a')
        ])
     ~trials:200
     ~f:(fun s ->
@@ -21,7 +22,9 @@ let%test_unit "same frames as Zstd.compress" =
 ;;
 
 let%expect_test "a destination that is too small raises" =
-  let src = Bytes.of_string (String.init 1000 ~f:(fun i -> Char.of_int_exn (i * 7919 % 256))) in
+  let src =
+    Bytes.of_string (String.init 1000 ~f:(fun i -> Char.of_int_exn (i * 7919 % 256)))
+  in
   print_s
     [%sexp
       (Result.try_with (fun () ->

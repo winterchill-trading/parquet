@@ -2,6 +2,7 @@
 
 open! Core
 open Parquet
+
 type 'a t
 
 (** [create ~schema path] creates (or truncates) [path] and writes the leading magic
