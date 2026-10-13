@@ -2,5 +2,8 @@
  (name parquet)
  (public_name parquet)
  (libraries core zstd)
+ (foreign_stubs
+  (language c)
+  (names parquet_zstd_stubs))
  (preprocess
   (pps ppx_jane)))
