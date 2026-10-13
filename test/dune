@@ -8,6 +8,7 @@
   core_unix
   core_unix.filename_unix
   core_unix.sys_unix
-  parquet)
+  parquet
+  zstd)
  (preprocess
   (pps ppx_jane)))
