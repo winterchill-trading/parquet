@@ -1,14 +1,7 @@
 open! Core
 
 external compress_bound : int -> int = "parquet_zstd_compress_bound"
-
-external compress_raw
-  :  int
-  -> Bytes.t
-  -> int
-  -> Bytes.t
-  -> int
-  = "parquet_zstd_compress"
+external compress_raw : int -> Bytes.t -> int -> Bytes.t -> int = "parquet_zstd_compress"
 
 let compress ~level src ~len ~dst =
   if len < 0 || len > Bytes.length src

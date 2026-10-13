@@ -11,8 +11,8 @@ val length : t -> int
 (** Reset the length to zero and keep the storage. *)
 val clear : t -> unit
 
-(** The underlying storage; only the first [length t] bytes are meaningful. Valid until the
-    next append. *)
+(** The underlying storage; only the first [length t] bytes are meaningful. Valid until
+    the next append. *)
 val unsafe_bytes : t -> Bytes.t
 
 val add_char : t -> char -> unit

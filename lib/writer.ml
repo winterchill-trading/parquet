@@ -51,8 +51,7 @@ module Int_col = struct
 end
 
 module Double_col = struct
-  (* An all-float record keeps [min] and [max] unboxed, so updating them never
-     allocates. *)
+  (* An all-float record keeps [min] and [max] unboxed, so updating them never allocates. *)
   type stats =
     { mutable min : float
     ; mutable max : float
@@ -411,7 +410,9 @@ module Direct = struct
        | None ->
          raise_s
            [%message
-             "Parquet.Writer.Direct: column has another type" (name : string) (kind : string)])
+             "Parquet.Writer.Direct: column has another type"
+               (name : string)
+               (kind : string)])
   ;;
 
   let int t name =

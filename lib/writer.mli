@@ -28,7 +28,8 @@ val add_all : 'a t -> 'a list -> unit
     same values.
 
     {[
-      let ts = Writer.Direct.int w "ts" and sz = Writer.Direct.float w "sz" in
+      let ts = Writer.Direct.int w "ts"
+      and sz = Writer.Direct.float w "sz" in
       Writer.Direct.add_int ts (Time_ns.to_int_ns_since_epoch trade.ts);
       Writer.Direct.add_float sz trade.sz;
       Writer.Direct.end_row w
