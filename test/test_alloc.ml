@@ -77,3 +77,39 @@ let%expect_test "words per file of 100_000 rows" =
     10.55 words per row
     |}]
 ;;
+
+module Float_u_of = struct
+  external unbox : float -> float# = "%unbox_float"
+
+  let[@inline] float i = unbox (Float.of_int i /. 100.)
+end
+
+let%expect_test "words per Writer.Direct row, float computed per row" =
+  Duckdb.with_parquet_file (fun file ->
+    Writer.with_file ~schema file ~f:(fun w ->
+      let open Writer.Direct in
+      let ts = int w "ts"
+      and coin = string w "coin"
+      and px = int w "px"
+      and sz = float w "sz"
+      and is_buy = bool w "is_buy" in
+      let add i =
+        add_int ts (1_700_000_000 + i);
+        add_string coin "BTC";
+        add_int px (60_000_000_000 + i);
+        add_float_u sz (Float_u_of.float i);
+        add_bool is_buy (i land 1 = 0);
+        end_row w
+      in
+      for i = 1 to 100_000 do
+        add i
+      done;
+      let words =
+        minor_words (fun () ->
+          for i = 1 to n do
+            add i
+          done)
+      in
+      printf "%d words for %d rows\n" words n));
+  [%expect {| 0 words for 1000 rows |}]
+;;
