@@ -71,8 +71,12 @@ module Double_col = struct
     }
   ;;
 
-  let[@inline] add t v =
-    Byte_buf.add_double_le t.buf v;
+  external box_float : float# -> float = "%box_float"
+  external unbox_float : float -> float# = "%unbox_float"
+
+  let[@inline] add_u t x =
+    Byte_buf.add_double_u_le t.buf x;
+    let v = box_float x in
     (* NaN is not ordered and must not appear in statistics. *)
     if not (Float.is_nan v)
     then (
@@ -81,6 +85,8 @@ module Double_col = struct
       if Float.is_nan s.max || Float.( > ) v s.max then s.max <- v);
     t.count <- t.count + 1
   ;;
+
+  let[@inline] add t v = add_u t (unbox_float v)
 
   let reset t =
     Byte_buf.clear t.buf;
@@ -434,6 +440,7 @@ module Direct = struct
 
   let add_int = Int_col.add
   let add_float = Double_col.add
+  let add_float_u = Double_col.add_u
   let add_string = Bytes_col.add
   let add_bool = Bool_col.add
 

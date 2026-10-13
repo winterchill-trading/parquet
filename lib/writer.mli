@@ -51,7 +51,10 @@ module Direct : sig
   (** Raises if an [int32] column gets a value that does not fit in 32 bits. *)
   val add_int : int_column -> int -> unit
 
+  (** Boxes [float] at the call unless the call is inlined; [add_float_u] never does. *)
   val add_float : float_column -> float -> unit
+
+  val add_float_u : float_column -> float# -> unit
   val add_string : string_column -> string -> unit
   val add_bool : bool_column -> bool -> unit
 
