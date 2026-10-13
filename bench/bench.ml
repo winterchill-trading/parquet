@@ -2,7 +2,9 @@
 
    {v dune exec bench/bench.exe -- [ROWS] v}
 
-   If [duckdb] is on [PATH] the file is checked with a row count query. *)
+   Each row goes once through [Writer.add] (a record per row, schema accessors) and once
+   through [Writer.Direct]. If [duckdb] is on [PATH] the file is checked with a row count
+   query. *)
 
 open! Core
 open Parquet
@@ -46,18 +48,44 @@ let words () =
   s.minor_words +. s.major_words -. s.promoted_words
 ;;
 
-let run ~rows ~compression path =
+external unbox_float : float -> float# = "%unbox_float"
+
+(* The same rows through [Writer.Direct], without building a record per row. *)
+let add_direct w ~rows =
+  let open Writer.Direct in
+  let ts = int w "ts"
+  and coin = string w "coin"
+  and px = int w "px"
+  and sz = float w "sz"
+  and is_buy = bool w "is_buy"
+  and trade_id = int w "trade_id" in
+  for i = 0 to rows - 1 do
+    add_int ts (1_700_000_000_000_000_000 + (i * 1_000_123));
+    add_string coin coins.(i % Array.length coins);
+    add_int px (60_000_000_000 + (i * 7919 % 1_000_000));
+    add_float_u sz (unbox_float (Float.of_int (i % 1000) /. 100.));
+    add_bool is_buy (i land 1 = 0);
+    add_int trade_id i;
+    end_row w
+  done
+;;
+
+let run ~rows ~direct ~compression path =
   let start = Time_ns.now () in
   let words_before = words () in
   Writer.with_file ~schema ~compression path ~f:(fun w ->
-    for i = 0 to rows - 1 do
-      Writer.add w (trade i)
-    done);
+    if direct
+    then add_direct w ~rows
+    else
+      for i = 0 to rows - 1 do
+        Writer.add w (trade i)
+      done);
   let words = words () -. words_before in
   let elapsed = Time_ns.diff (Time_ns.now ()) start |> Time_ns.Span.to_sec in
   let bytes = (Core_unix.stat path).st_size |> Int64.to_int_exn in
   printf
-    "%-5s %9d rows  %7.3f s  %6.2f M rows/s  %6.1f words/row  %7.1f MB file\n%!"
+    "%-6s %-5s %9d rows  %7.3f s  %6.2f M rows/s  %6.1f words/row  %7.1f MB file\n%!"
+    (if direct then "direct" else "add")
     (match compression with
      | `None -> "none"
      | `Zstd -> "zstd")
@@ -81,9 +109,10 @@ let () =
     | _ -> 1_000_000
   in
   let dir = Filename_unix.temp_dir "parquet" "bench" in
-  List.iter [ `None; `Zstd ] ~f:(fun compression ->
-    let path = dir ^/ "bench.parquet" in
-    run ~rows ~compression path;
-    Sys_unix.remove path);
+  List.iter [ false; true ] ~f:(fun direct ->
+    List.iter [ `None; `Zstd ] ~f:(fun compression ->
+      let path = dir ^/ "bench.parquet" in
+      run ~rows ~direct ~compression path;
+      Sys_unix.remove path));
   Core_unix.rmdir dir
 ;;
