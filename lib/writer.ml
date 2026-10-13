@@ -5,69 +5,181 @@ let magic = "PAR1"
 let created_by = "parquet-ocaml version 0.1.0"
 let zstd_level = 3
 
-(* Per-column buffer for the current row group, with running statistics. *)
-module Chunk = struct
-  type 'a t =
-    | Int of
-        { f : 'a -> int
-        ; is_32 : bool
-        ; buf : Buffer.t
-        ; mutable min : int
-        ; mutable max : int
-        }
-    | Double of
-        { f : 'a -> float
-        ; buf : Buffer.t
-        ; mutable min : float
-        ; mutable max : float
-        }
-    | Bytes of
-        { f : 'a -> string
-        ; buf : Buffer.t
-        ; mutable min : string option
-        ; mutable max : string option
-        }
-    | Bool of
-        { f : 'a -> bool
-        ; buf : Buffer.t
-        ; bits : Encoding.Booleans.t
-        }
+(* Typed column builders for the current row group, with running statistics. Values are
+   appended by [Writer.add] through the schema accessors or directly by the caller through
+   [Direct]; [count] lets [Direct.end_row] check that every column got one value. *)
 
-  let create (accessor : 'a Schema.Column.Accessor.t) =
-    let buf = Buffer.create 4096 in
-    match accessor with
-    | Int32 f -> Int { f; is_32 = true; buf; min = Int.max_value; max = Int.min_value }
-    | Int64 f -> Int { f; is_32 = false; buf; min = Int.max_value; max = Int.min_value }
-    | Double f -> Double { f; buf; min = Float.nan; max = Float.nan }
-    | Byte_array f -> Bytes { f; buf; min = None; max = None }
-    | Boolean f -> Bool { f; buf; bits = Encoding.Booleans.create () }
+module Int_col = struct
+  type t =
+    { is_32 : bool
+    ; buf : Byte_buf.t
+    ; mutable min : int
+    ; mutable max : int
+    ; mutable count : int
+    }
+
+  let create ~is_32 =
+    { is_32
+    ; buf = Byte_buf.create 4096
+    ; min = Int.max_value
+    ; max = Int.min_value
+    ; count = 0
+    }
   ;;
 
-  let add t row =
+  let[@cold] out_of_range n =
+    raise_s [%message "Parquet.Encoding.int32: out of range" (n : int)]
+  ;;
+
+  let[@inline] add t v =
+    if t.is_32
+    then (
+      if v < -0x8000_0000 || v > 0x7FFF_FFFF then out_of_range v;
+      Byte_buf.add_int32_le t.buf v)
+    else Byte_buf.add_int64_le t.buf v;
+    if v < t.min then t.min <- v;
+    if v > t.max then t.max <- v;
+    t.count <- t.count + 1
+  ;;
+
+  let reset t =
+    Byte_buf.clear t.buf;
+    t.min <- Int.max_value;
+    t.max <- Int.min_value;
+    t.count <- 0
+  ;;
+end
+
+module Double_col = struct
+  (* An all-float record keeps [min] and [max] unboxed, so updating them never
+     allocates. *)
+  type stats =
+    { mutable min : float
+    ; mutable max : float
+    }
+
+  type t =
+    { buf : Byte_buf.t
+    ; stats : stats
+    ; mutable count : int
+    }
+
+  let create () =
+    { buf = Byte_buf.create 4096
+    ; stats = { min = Float.nan; max = Float.nan }
+    ; count = 0
+    }
+  ;;
+
+  let[@inline] add t v =
+    Byte_buf.add_double_le t.buf v;
+    (* NaN is not ordered and must not appear in statistics. *)
+    if not (Float.is_nan v)
+    then (
+      let s = t.stats in
+      if Float.is_nan s.min || Float.( < ) v s.min then s.min <- v;
+      if Float.is_nan s.max || Float.( > ) v s.max then s.max <- v);
+    t.count <- t.count + 1
+  ;;
+
+  let reset t =
+    Byte_buf.clear t.buf;
+    t.stats.min <- Float.nan;
+    t.stats.max <- Float.nan;
+    t.count <- 0
+  ;;
+end
+
+module Bytes_col = struct
+  (* [min] and [max] are meaningful only when [count > 0]. *)
+  type t =
+    { buf : Byte_buf.t
+    ; mutable min : string
+    ; mutable max : string
+    ; mutable count : int
+    }
+
+  let create () = { buf = Byte_buf.create 4096; min = ""; max = ""; count = 0 }
+
+  let[@inline] add t v =
+    Byte_buf.add_int32_le t.buf (String.length v);
+    Byte_buf.add_string t.buf v;
+    if t.count = 0
+    then (
+      t.min <- v;
+      t.max <- v)
+    else (
+      if String.( < ) v t.min then t.min <- v;
+      if String.( > ) v t.max then t.max <- v);
+    t.count <- t.count + 1
+  ;;
+
+  let reset t =
+    Byte_buf.clear t.buf;
+    t.min <- "";
+    t.max <- "";
+    t.count <- 0
+  ;;
+end
+
+module Bool_col = struct
+  (* Bit-packed, least significant bit first; [byte] holds the [bits] pending bits. *)
+  type t =
+    { buf : Byte_buf.t
+    ; mutable byte : int
+    ; mutable bits : int
+    ; mutable count : int
+    }
+
+  let create () = { buf = Byte_buf.create 4096; byte = 0; bits = 0; count = 0 }
+
+  let[@inline] add t b =
+    if b then t.byte <- t.byte lor (1 lsl t.bits);
+    t.bits <- t.bits + 1;
+    if t.bits = 8
+    then (
+      Byte_buf.add_char t.buf (Char.unsafe_of_int t.byte);
+      t.byte <- 0;
+      t.bits <- 0);
+    t.count <- t.count + 1
+  ;;
+
+  let flush t =
+    if t.bits > 0 then Byte_buf.add_char t.buf (Char.unsafe_of_int t.byte);
+    t.byte <- 0;
+    t.bits <- 0
+  ;;
+
+  let reset t =
+    Byte_buf.clear t.buf;
+    t.byte <- 0;
+    t.bits <- 0;
+    t.count <- 0
+  ;;
+end
+
+module Chunk = struct
+  type 'a t =
+    | Int of ('a -> int) * Int_col.t
+    | Double of ('a -> float) * Double_col.t
+    | Bytes of ('a -> string) * Bytes_col.t
+    | Bool of ('a -> bool) * Bool_col.t
+
+  let create column =
+    match Schema.Column.accessor column with
+    | Int32 f -> Int (f, Int_col.create ~is_32:true)
+    | Int64 f -> Int (f, Int_col.create ~is_32:false)
+    | Double f -> Double (f, Double_col.create ())
+    | Byte_array f -> Bytes (f, Bytes_col.create ())
+    | Boolean f -> Bool (f, Bool_col.create ())
+  ;;
+
+  let[@inline] add t row =
     match t with
-    | Int c ->
-      let v = c.f row in
-      if c.is_32 then Encoding.int32 c.buf v else Encoding.int64 c.buf v;
-      if v < c.min then c.min <- v;
-      if v > c.max then c.max <- v
-    | Double c ->
-      let v = c.f row in
-      Encoding.double c.buf v;
-      (* NaN is not ordered and must not appear in statistics. *)
-      if not (Float.is_nan v)
-      then (
-        if Float.is_nan c.min || Float.( < ) v c.min then c.min <- v;
-        if Float.is_nan c.max || Float.( > ) v c.max then c.max <- v)
-    | Bytes c ->
-      let v = c.f row in
-      Encoding.byte_array c.buf v;
-      (match c.min with
-       | Some m when String.( >= ) v m -> ()
-       | _ -> c.min <- Some v);
-      (match c.max with
-       | Some m when String.( <= ) v m -> ()
-       | _ -> c.max <- Some v)
-    | Bool c -> Encoding.Booleans.add c.bits c.buf (c.f row)
+    | Int (f, c) -> Int_col.add c (f row)
+    | Double (f, c) -> Double_col.add c (f row)
+    | Bytes (f, c) -> Bytes_col.add c (f row)
+    | Bool (f, c) -> Bool_col.add c (f row)
   ;;
 
   let plain f =
@@ -76,14 +188,13 @@ module Chunk = struct
     Buffer.contents buf
   ;;
 
-  (* Returns the page payload and statistics, and resets the chunk. *)
-  let finish t ~num_rows : string * M.Statistics.t =
+  (* Returns the page payload, valid until [reset], and the statistics. *)
+  let finish t ~num_rows : Byte_buf.t * M.Statistics.t =
     let stats ?min ?max () : M.Statistics.t =
       { null_count = Some 0; min_value = min; max_value = max }
     in
     match t with
-    | Int c ->
-      let data = Buffer.contents c.buf in
+    | Int (_, c) ->
       let encode v =
         plain (fun b -> if c.is_32 then Encoding.int32 b v else Encoding.int64 b v)
       in
@@ -92,40 +203,34 @@ module Chunk = struct
         then stats ()
         else stats ~min:(encode c.min) ~max:(encode c.max) ()
       in
-      Buffer.clear c.buf;
-      c.min <- Int.max_value;
-      c.max <- Int.min_value;
-      data, stats
-    | Double c ->
-      let data = Buffer.contents c.buf in
+      c.buf, stats
+    | Double (_, c) ->
       let stats =
-        if Float.is_nan c.min
+        if Float.is_nan c.stats.min
         then stats ()
         else (
           (* The spec asks for -0.0 as a zero minimum and +0.0 as a zero maximum. *)
-          let min = if Float.equal c.min 0. then -0. else c.min in
-          let max = if Float.equal c.max 0. then 0. else c.max in
+          let min = if Float.equal c.stats.min 0. then -0. else c.stats.min in
+          let max = if Float.equal c.stats.max 0. then 0. else c.stats.max in
           stats
             ~min:(plain (fun b -> Encoding.double b min))
             ~max:(plain (fun b -> Encoding.double b max))
             ())
       in
-      Buffer.clear c.buf;
-      c.min <- Float.nan;
-      c.max <- Float.nan;
-      data, stats
-    | Bytes c ->
-      let data = Buffer.contents c.buf in
-      let stats = stats ?min:c.min ?max:c.max () in
-      Buffer.clear c.buf;
-      c.min <- None;
-      c.max <- None;
-      data, stats
-    | Bool c ->
-      Encoding.Booleans.flush c.bits c.buf;
-      let data = Buffer.contents c.buf in
-      Buffer.clear c.buf;
-      data, stats ()
+      c.buf, stats
+    | Bytes (_, c) ->
+      let stats = if c.count = 0 then stats () else stats ~min:c.min ~max:c.max () in
+      c.buf, stats
+    | Bool (_, c) ->
+      Bool_col.flush c;
+      c.buf, stats ()
+  ;;
+
+  let reset = function
+    | Int (_, c) -> Int_col.reset c
+    | Double (_, c) -> Double_col.reset c
+    | Bytes (_, c) -> Bytes_col.reset c
+    | Bool (_, c) -> Bool_col.reset c
   ;;
 end
 
@@ -136,6 +241,7 @@ type 'a t =
   ; row_group_rows : int
   ; compression : [ `None | `Zstd ]
   ; out : Out_channel.t
+  ; mutable scratch : Bytes.t (* zstd output, reused across pages *)
   ; mutable pos : int
   ; mutable rows_in_group : int
   ; mutable num_rows : int
@@ -148,6 +254,11 @@ let output t s =
   t.pos <- t.pos + String.length s
 ;;
 
+let output_bytes t buf ~len =
+  Out_channel.output t.out ~buf ~pos:0 ~len;
+  t.pos <- t.pos + len
+;;
+
 let create ~schema ?(row_group_rows = 1_048_576) ?(compression = `None) path =
   if row_group_rows < 1
   then raise_s [%message "Parquet.Writer.create: row_group_rows must be positive"];
@@ -155,10 +266,11 @@ let create ~schema ?(row_group_rows = 1_048_576) ?(compression = `None) path =
   let t =
     { schema
     ; columns
-    ; chunks = Array.map columns ~f:(fun c -> Chunk.create (Schema.Column.accessor c))
+    ; chunks = Array.map columns ~f:Chunk.create
     ; row_group_rows
     ; compression
     ; out = Out_channel.create ~binary:true path
+    ; scratch = Bytes.create 0
     ; pos = 0
     ; rows_in_group = 0
     ; num_rows = 0
@@ -171,14 +283,23 @@ let create ~schema ?(row_group_rows = 1_048_576) ?(compression = `None) path =
 ;;
 
 let write_column_chunk t column chunk ~num_rows : M.Column_chunk.t =
-  let data, statistics = Chunk.finish chunk ~num_rows in
-  let uncompressed_size = String.length data in
-  let (codec : M.Compression_codec.t), data =
+  let buf, statistics = Chunk.finish chunk ~num_rows in
+  let uncompressed_size = Byte_buf.length buf in
+  let (codec : M.Compression_codec.t), data, compressed_size =
     match t.compression with
-    | `None -> Uncompressed, data
-    | `Zstd -> Zstd, Zstd.compress ~level:zstd_level data
+    | `None -> Uncompressed, Byte_buf.unsafe_bytes buf, uncompressed_size
+    | `Zstd ->
+      let bound = Zstd_bytes.compress_bound uncompressed_size in
+      if Bytes.length t.scratch < bound then t.scratch <- Bytes.create bound;
+      let n =
+        Zstd_bytes.compress
+          ~level:zstd_level
+          (Byte_buf.unsafe_bytes buf)
+          ~len:uncompressed_size
+          ~dst:t.scratch
+      in
+      Zstd, t.scratch, n
   in
-  let compressed_size = String.length data in
   let header : M.Page_header.t =
     { type_ = Data_page
     ; uncompressed_page_size = uncompressed_size
@@ -196,7 +317,8 @@ let write_column_chunk t column chunk ~num_rows : M.Column_chunk.t =
   let header = Thrift_compact.to_string (M.Page_header.to_thrift header) in
   let offset = t.pos in
   output t header;
-  output t data;
+  output_bytes t data ~len:compressed_size;
+  Chunk.reset chunk;
   let header_size = String.length header in
   { file_offset = offset
   ; meta_data =
@@ -245,7 +367,10 @@ let check_open t name =
 
 let add t row =
   check_open t "add";
-  Array.iter t.chunks ~f:(fun chunk -> Chunk.add chunk row);
+  let chunks = t.chunks in
+  for i = 0 to Array.length chunks - 1 do
+    Chunk.add (Array.unsafe_get chunks i) row
+  done;
   t.rows_in_group <- t.rows_in_group + 1;
   t.num_rows <- t.num_rows + 1;
   if t.rows_in_group >= t.row_group_rows then flush_row_group t
