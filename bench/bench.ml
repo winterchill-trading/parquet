@@ -40,22 +40,31 @@ let trade i =
   }
 ;;
 
+(* Words allocated on the minor and major heaps, excluding promotions. *)
+let words () =
+  let s = Gc.quick_stat () in
+  s.minor_words +. s.major_words -. s.promoted_words
+;;
+
 let run ~rows ~compression path =
   let start = Time_ns.now () in
+  let words_before = words () in
   Writer.with_file ~schema ~compression path ~f:(fun w ->
     for i = 0 to rows - 1 do
       Writer.add w (trade i)
     done);
+  let words = words () -. words_before in
   let elapsed = Time_ns.diff (Time_ns.now ()) start |> Time_ns.Span.to_sec in
   let bytes = (Core_unix.stat path).st_size |> Int64.to_int_exn in
   printf
-    "%-5s %9d rows  %7.3f s  %6.2f M rows/s  %7.1f MB file\n%!"
+    "%-5s %9d rows  %7.3f s  %6.2f M rows/s  %6.1f words/row  %7.1f MB file\n%!"
     (match compression with
      | `None -> "none"
      | `Zstd -> "zstd")
     rows
     elapsed
     (Float.of_int rows /. elapsed /. 1e6)
+    (words /. Float.of_int rows)
     (Float.of_int bytes /. 1e6);
   match
     Sys_unix.command
