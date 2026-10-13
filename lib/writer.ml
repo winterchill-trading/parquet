@@ -182,6 +182,13 @@ module Chunk = struct
     | Bool (f, c) -> Bool_col.add c (f row)
   ;;
 
+  let count = function
+    | Int (_, c) -> c.count
+    | Double (_, c) -> c.count
+    | Bytes (_, c) -> c.count
+    | Bool (_, c) -> c.count
+  ;;
+
   let plain f =
     let buf = Buffer.create 8 in
     f buf;
@@ -365,16 +372,91 @@ let check_open t name =
   if t.closed then raise_s [%message "Parquet.Writer: writer is closed" (name : string)]
 ;;
 
+let finish_row t =
+  t.rows_in_group <- t.rows_in_group + 1;
+  t.num_rows <- t.num_rows + 1;
+  if t.rows_in_group >= t.row_group_rows then flush_row_group t
+;;
+
 let add t row =
   check_open t "add";
   let chunks = t.chunks in
   for i = 0 to Array.length chunks - 1 do
     Chunk.add (Array.unsafe_get chunks i) row
   done;
-  t.rows_in_group <- t.rows_in_group + 1;
-  t.num_rows <- t.num_rows + 1;
-  if t.rows_in_group >= t.row_group_rows then flush_row_group t
+  finish_row t
 ;;
+
+module Direct = struct
+  type int_column = Int_col.t
+  type float_column = Double_col.t
+  type string_column = Bytes_col.t
+  type bool_column = Bool_col.t
+
+  let find t name ~kind ~f =
+    match
+      Array.find_mapi t.columns ~f:(fun i c ->
+        if String.equal (Schema.Column.name c) name then Some t.chunks.(i) else None)
+    with
+    | None -> raise_s [%message "Parquet.Writer.Direct: no such column" (name : string)]
+    | Some chunk ->
+      (match f chunk with
+       | Some c -> c
+       | None ->
+         raise_s
+           [%message
+             "Parquet.Writer.Direct: column has another type" (name : string) (kind : string)])
+  ;;
+
+  let int t name =
+    find t name ~kind:"int" ~f:(function
+      | Chunk.Int (_, c) -> Some c
+      | _ -> None)
+  ;;
+
+  let float t name =
+    find t name ~kind:"float" ~f:(function
+      | Chunk.Double (_, c) -> Some c
+      | _ -> None)
+  ;;
+
+  let string t name =
+    find t name ~kind:"string" ~f:(function
+      | Chunk.Bytes (_, c) -> Some c
+      | _ -> None)
+  ;;
+
+  let bool t name =
+    find t name ~kind:"bool" ~f:(function
+      | Chunk.Bool (_, c) -> Some c
+      | _ -> None)
+  ;;
+
+  let add_int = Int_col.add
+  let add_float = Double_col.add
+  let add_string = Bytes_col.add
+  let add_bool = Bool_col.add
+
+  let[@cold] bad_row t i =
+    let name = Schema.Column.name t.columns.(i) in
+    let values = Chunk.count t.chunks.(i) - t.rows_in_group in
+    raise_s
+      [%message
+        "Parquet.Writer.Direct.end_row: a column needs exactly one value per row"
+          (name : string)
+          (values : int)]
+  ;;
+
+  let end_row t =
+    check_open t "Direct.end_row";
+    let chunks = t.chunks in
+    let expected = t.rows_in_group + 1 in
+    for i = 0 to Array.length chunks - 1 do
+      if Chunk.count (Array.unsafe_get chunks i) <> expected then bad_row t i
+    done;
+    finish_row t
+  ;;
+end
 
 let add_all t rows = List.iter rows ~f:(add t)
 let num_rows t = t.num_rows
