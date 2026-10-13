@@ -77,7 +77,7 @@ let%expect_test "words per file of 100_000 rows" =
       printf "%.2f words per row\n" (Float.of_int words /. 100_000.)));
   [%expect {|
     10.56 words per row
-    10.55 words per row
+    10.56 words per row
     |}]
 ;;
 
