@@ -19,5 +19,9 @@ val add_char : t -> char -> unit
 val add_int32_le : t -> int -> unit
 val add_int64_le : t -> int -> unit
 val add_double_le : t -> float -> unit
+
+(** [add_double_le] for an unboxed float. *)
+val add_double_u_le : t -> float# -> unit
+
 val add_string : t -> string -> unit
 val contents : t -> string

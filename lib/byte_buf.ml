@@ -46,6 +46,14 @@ let add_double_le t x =
   t.len <- t.len + 8
 ;;
 
+external box_float : float# -> float = "%box_float"
+
+let add_double_u_le t x =
+  reserve t 8;
+  Stdlib.Bytes.set_int64_le t.bytes t.len (Int64.bits_of_float (box_float x));
+  t.len <- t.len + 8
+;;
+
 let add_string t s =
   let n = String.length s in
   reserve t n;
