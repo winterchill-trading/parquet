@@ -21,9 +21,9 @@
 
 (package
  (name parquet)
- (synopsis "Apache Parquet writer in OCaml, for OxCaml")
+ (synopsis "Apache Parquet writer and reader in OCaml, for OxCaml")
  (description
-  "Writes Apache Parquet files with no Arrow or C++ dependency. The Thrift compact protocol, PLAIN encoding, page headers, statistics and the file footer are implemented in OCaml; zstd compression goes through libzstd. Columns are described with typed combinators over a row type, rows are buffered column by column with statistics, and a direct per-column API appends values without allocating. Requires the OxCaml compiler (unboxed floats) and the Jane Street libraries from its opam repository.")
+  "Writes and reads Apache Parquet files with no Arrow or C++ dependency. The Thrift compact protocol, the PLAIN, dictionary, RLE/bit-packed and DELTA encodings, definition levels for nullable columns, statistics and the file footer are implemented in OCaml; zstd compression goes through libzstd, and the reader also decompresses snappy and lz4_raw. Columns are described with typed combinators over a row type, rows are buffered column by column with statistics, and a direct per-column API appends values without allocating. Requires the OxCaml compiler (unboxed floats) and the Jane Street libraries from its opam repository.")
  (tags
   (parquet columnar storage oxcaml))
  (depends
