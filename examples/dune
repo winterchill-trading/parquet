@@ -1,0 +1,7 @@
+; Worked example from the README, built and run in CI.
+
+(executable
+ (name trades)
+ (libraries core parquet)
+ (preprocess
+  (pps ppx_jane)))
