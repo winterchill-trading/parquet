@@ -129,6 +129,7 @@ module Int_col = struct
     { is_32 : bool
     ; buf : Byte_buf.t
     ; levels : Levels.t option
+    ; plain : bool (* no levels and no dictionary: [add] skips both *)
     ; dict : int Dict.t option
     ; mutable min : int
     ; mutable max : int
@@ -139,6 +140,7 @@ module Int_col = struct
     { is_32
     ; buf = Byte_buf.create 4096
     ; levels = Levels.create ~optional
+    ; plain = (not optional) && not dictionary
     ; dict =
         Dict.create
           ~dictionary
@@ -154,6 +156,14 @@ module Int_col = struct
     raise_s [%message "Parquet.Encoding.int32: out of range" (n : int)]
   ;;
 
+  (* Out of line, to keep [add] small for plain columns. *)
+  let[@inline never] extras t v =
+    Levels.present t.levels;
+    match t.dict with
+    | None -> ()
+    | Some d -> Dict.add d v
+  ;;
+
   let[@inline] add t v =
     if t.is_32
     then (
@@ -162,10 +172,7 @@ module Int_col = struct
     else Byte_buf.add_int64_le t.buf v;
     if v < t.min then t.min <- v;
     if v > t.max then t.max <- v;
-    Levels.present t.levels;
-    (match t.dict with
-     | None -> ()
-     | Some d -> Dict.add d v);
+    if not t.plain then extras t v;
     t.count <- t.count + 1
   ;;
 
@@ -189,6 +196,7 @@ module Double_col = struct
   type t =
     { buf : Byte_buf.t
     ; levels : Levels.t option
+    ; plain : bool (* no levels and no dictionary: [add] skips both *)
     ; dict : Int64.t Dict.t option (* keyed by the bits, so NaNs and -0. are kept *)
     ; stats : stats
     ; mutable count : int
@@ -197,6 +205,7 @@ module Double_col = struct
   let create ~optional ~dictionary =
     { buf = Byte_buf.create 4096
     ; levels = Levels.create ~optional
+    ; plain = (not optional) && not dictionary
     ; dict =
         Dict.create ~dictionary (module Int64) ~encode:(fun buf bits ->
           Byte_buf.add_double_le buf (Int64.float_of_bits bits))
@@ -208,6 +217,13 @@ module Double_col = struct
   external box_float : float# -> float = "%box_float"
   external unbox_float : float -> float# = "%unbox_float"
 
+  let[@inline never] extras t v =
+    Levels.present t.levels;
+    match t.dict with
+    | None -> ()
+    | Some d -> Dict.add d (Int64.bits_of_float v)
+  ;;
+
   let[@inline] add_u t x =
     Byte_buf.add_double_u_le t.buf x;
     let v = box_float x in
@@ -217,10 +233,7 @@ module Double_col = struct
       let s = t.stats in
       if Float.is_nan s.min || Float.( < ) v s.min then s.min <- v;
       if Float.is_nan s.max || Float.( > ) v s.max then s.max <- v);
-    Levels.present t.levels;
-    (match t.dict with
-     | None -> ()
-     | Some d -> Dict.add d (Int64.bits_of_float v));
+    if not t.plain then extras t v;
     t.count <- t.count + 1
   ;;
 
@@ -241,6 +254,7 @@ module Bytes_col = struct
   type t =
     { buf : Byte_buf.t
     ; levels : Levels.t option
+    ; plain : bool (* no levels and no dictionary: [add] skips both *)
     ; dict : string Dict.t option
     ; mutable min : string
     ; mutable max : string
@@ -255,6 +269,7 @@ module Bytes_col = struct
   let create ~optional ~dictionary =
     { buf = Byte_buf.create 4096
     ; levels = Levels.create ~optional
+    ; plain = (not optional) && not dictionary
     ; dict = Dict.create ~dictionary (module String) ~encode
     ; min = ""
     ; max = ""
@@ -262,20 +277,24 @@ module Bytes_col = struct
     }
   ;;
 
+  let[@inline never] extras t v =
+    Levels.present t.levels;
+    match t.dict with
+    | None -> ()
+    | Some d -> Dict.add d v
+  ;;
+
   let[@inline] add t v =
     Byte_buf.add_int32_le t.buf (String.length v);
     Byte_buf.add_string t.buf v;
-    if t.count = Levels.nulls t.levels
+    if if t.plain then t.count = 0 else t.count = Levels.nulls t.levels
     then (
       t.min <- v;
       t.max <- v)
     else (
       if String.( < ) v t.min then t.min <- v;
       if String.( > ) v t.max then t.max <- v);
-    Levels.present t.levels;
-    (match t.dict with
-     | None -> ()
-     | Some d -> Dict.add d v);
+    if not t.plain then extras t v;
     t.count <- t.count + 1
   ;;
 
@@ -294,6 +313,7 @@ module Bool_col = struct
   type t =
     { buf : Byte_buf.t
     ; levels : Levels.t option
+    ; plain : bool (* no levels: [add] skips them *)
     ; mutable byte : int
     ; mutable bits : int
     ; mutable count : int
@@ -302,6 +322,7 @@ module Bool_col = struct
   let create ~optional =
     { buf = Byte_buf.create 4096
     ; levels = Levels.create ~optional
+    ; plain = not optional
     ; byte = 0
     ; bits = 0
     ; count = 0
@@ -316,7 +337,7 @@ module Bool_col = struct
       Byte_buf.add_char t.buf (Char.unsafe_of_int t.byte);
       t.byte <- 0;
       t.bits <- 0);
-    Levels.present t.levels;
+    if not t.plain then Levels.present t.levels;
     t.count <- t.count + 1
   ;;
 
@@ -396,7 +417,19 @@ module Chunk = struct
     | Optional (_, inner) -> add_null inner
   ;;
 
-  let rec add : type a. a t -> a -> unit =
+  (* Values of an optional column, whose chunk is the one under [Optional]. *)
+  let add_present : type a. a t -> a -> unit =
+    fun t v ->
+    match t with
+    | Int (f, c) -> Int_col.add c (f v)
+    | Double (f, c) -> Double_col.add c (f v)
+    | Bytes (f, c) -> Bytes_col.add c (f v)
+    | Bool (f, c) -> Bool_col.add c (f v)
+    | Optional _ -> assert false
+  ;;
+
+  (* Not recursive, so that it inlines into [Writer.add]'s loop. *)
+  let[@inline] add : type a. a t -> a -> unit =
     fun t row ->
     match t with
     | Int (f, c) -> Int_col.add c (f row)
@@ -405,16 +438,25 @@ module Chunk = struct
     | Bool (f, c) -> Bool_col.add c (f row)
     | Optional (f, inner) ->
       (match f row with
-       | Some v -> add inner v
+       | Some v -> add_present inner v
        | None -> add_null inner)
   ;;
 
-  let rec count : type a. a t -> int = function
+  let count_inner : type a. a t -> int = function
     | Int (_, c) -> c.count
     | Double (_, c) -> c.count
     | Bytes (_, c) -> c.count
     | Bool (_, c) -> c.count
-    | Optional (_, inner) -> count inner
+    | Optional _ -> assert false
+  ;;
+
+  (* Not recursive, so that it inlines into [Direct.end_row]'s loop. *)
+  let[@inline] count : type a. a t -> int = function
+    | Int (_, c) -> c.count
+    | Double (_, c) -> c.count
+    | Bytes (_, c) -> c.count
+    | Bool (_, c) -> c.count
+    | Optional (_, inner) -> count_inner inner
   ;;
 
   let plain f =
