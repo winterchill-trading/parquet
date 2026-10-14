@@ -3,8 +3,8 @@
    {v dune exec bench/bench.exe -- [ROWS] v}
 
    Each row goes once through [Writer.add] (a record per row, schema accessors) and once
-   through [Writer.Direct]. If [duckdb] is on [PATH] the file is checked with a row count
-   query. *)
+   through [Writer.Direct]; the [add] files are read back with [Reader.fold_rows]. If
+   [duckdb] is on [PATH] the file is checked with a row count query. *)
 
 open! Core
 open Parquet
@@ -70,6 +70,29 @@ let add_direct w ~rows =
   done
 ;;
 
+(* Every row back through [Reader.fold_rows]. *)
+let read ~rows ~compression path =
+  let start = Time_ns.now () in
+  let words_before = words () in
+  let n =
+    Reader.with_file path ~f:(fun r -> Reader.fold_rows r ~init:0 ~f:(fun n _ -> n + 1))
+    |> Or_error.ok_exn
+  in
+  assert (n = rows);
+  let words = words () -. words_before in
+  let elapsed = Time_ns.diff (Time_ns.now ()) start |> Time_ns.Span.to_sec in
+  printf
+    "%-6s %-5s %9d rows  %7.3f s  %6.2f M rows/s  %6.1f words/row\n%!"
+    "read"
+    (match compression with
+     | `None -> "none"
+     | `Zstd -> "zstd")
+    rows
+    elapsed
+    (Float.of_int rows /. elapsed /. 1e6)
+    (words /. Float.of_int rows)
+;;
+
 let run ~rows ~direct ~compression path =
   let start = Time_ns.now () in
   let words_before = words () in
@@ -94,12 +117,13 @@ let run ~rows ~direct ~compression path =
     (Float.of_int rows /. elapsed /. 1e6)
     (words /. Float.of_int rows)
     (Float.of_int bytes /. 1e6);
-  match
-    Sys_unix.command
-      (sprintf "duckdb -csv -noheader -c \"select count(*) from '%s'\"" path)
-  with
-  | 0 -> ()
-  | _ -> print_endline "(duckdb check skipped or failed)"
+  (match
+     Sys_unix.command
+       (sprintf "duckdb -csv -noheader -c \"select count(*) from '%s'\"" path)
+   with
+   | 0 -> ()
+   | _ -> print_endline "(duckdb check skipped or failed)");
+  if not direct then read ~rows ~compression path
 ;;
 
 let () =
