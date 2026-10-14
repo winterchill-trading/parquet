@@ -116,3 +116,32 @@ let%expect_test "words per Writer.Direct row, float computed per row" =
       printf "%d words for %d rows\n" words n));
   [%expect {| 0 words for 1000 rows |}]
 ;;
+
+(* Optional columns cost nothing extra per row: the accessor returns the option already in
+   the row, and a definition level is one byte in a reused buffer. *)
+type orow =
+  { qty : int option
+  ; note : string option
+  }
+
+let%expect_test "words per Writer.add with optional columns" =
+  let schema =
+    Schema.create
+      Schema.Column.
+        [ optional int64 "qty" (fun r -> r.qty); optional utf8 "note" (fun r -> r.note) ]
+  in
+  let rows = [| { qty = Some 3; note = None }; { qty = None; note = Some "x" } |] in
+  Duckdb.with_parquet_file (fun file ->
+    Writer.with_file ~schema file ~f:(fun w ->
+      for i = 1 to 100_000 do
+        Writer.add w rows.(i land 1)
+      done;
+      let words =
+        minor_words (fun () ->
+          for i = 1 to n do
+            Writer.add w rows.(i land 1)
+          done)
+      in
+      printf "%d words for %d rows\n" words n));
+  [%expect {| 0 words for 1000 rows |}]
+;;
