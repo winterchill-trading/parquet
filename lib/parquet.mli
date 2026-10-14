@@ -37,8 +37,8 @@
     [examples/trades.ml] in the repository is the same program, built and run in CI.
 
     The lower-level modules ({!Metadata}, {!Thrift_compact}, {!Encoding}, {!Rle_hybrid},
-    {!Byte_buf}, {!Zstd_bytes}) are the building blocks of the two above, exposed for
-    tools that need the file structures themselves. *)
+    {!Byte_buf}, {!Zstd_bytes}, {!Decompress}) are the building blocks of the two above,
+    exposed for tools that need the file structures themselves. *)
 
 (** Typed column descriptions. *)
 module Schema = Schema
@@ -66,3 +66,6 @@ module Byte_buf = Byte_buf
 
 (** zstd compression over [Bytes.t]. *)
 module Zstd_bytes = Zstd_bytes
+
+(** Snappy and LZ4 decompression for the reader. *)
+module Decompress = Decompress
