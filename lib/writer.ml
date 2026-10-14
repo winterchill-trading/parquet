@@ -324,6 +324,7 @@ let write_column_chunk t column chunk ~num_rows : M.Column_chunk.t =
           ; repetition_level_encoding = Rle
           ; statistics = Some statistics
           }
+    ; dictionary_page_header = None
     }
   in
   let header = Thrift_compact.to_string (M.Page_header.to_thrift header) in
@@ -342,6 +343,7 @@ let write_column_chunk t column chunk ~num_rows : M.Column_chunk.t =
       ; total_uncompressed_size = header_size + uncompressed_size
       ; total_compressed_size = header_size + compressed_size
       ; data_page_offset = offset
+      ; dictionary_page_offset = None
       ; statistics = Some statistics
       }
   }
@@ -478,6 +480,7 @@ let close t =
       ; schema = Schema.schema_elements t.schema
       ; num_rows = t.num_rows
       ; row_groups = List.rev t.row_groups
+      ; key_value_metadata = []
       ; created_by = Some created_by
       ; type_defined_order = true
       }
