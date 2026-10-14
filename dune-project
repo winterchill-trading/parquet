@@ -27,16 +27,25 @@
  (tags
   (parquet columnar storage oxcaml))
  (depends
+  oxcaml
   (ocaml
-   (>= 5.2.0))
+   (and
+    (>= 5.2.0)
+    (< 5.3~)))
   dune
   (core
-   (>= v0.18~preview))
+   (and
+    (>= v0.18~preview.130.106+341)
+    (< v0.19~)))
   (ppx_jane
-   (>= v0.18~preview))
+   (and
+    (>= v0.18~preview.130.106+341)
+    (< v0.19~)))
   (zstd
    (>= 0.4))
   (core_unix
    (and
     :with-test
-    (>= v0.18~preview)))))
+    (>= v0.18~preview.130.106+341)
+    (< v0.19~)))
+  (odoc :with-doc)))
