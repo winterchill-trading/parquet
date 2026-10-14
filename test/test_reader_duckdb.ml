@@ -13,7 +13,7 @@ let source =
    (i % 1000)::double / 4 as d, case when i % 9 = 0 then null else ((i % 100)::real / 2) \
    end as r, make_timestamp_ns(1700000000000000000 + i * 1001) as ts, ((i % 100000) / \
    100)::decimal(9, 2) as dec, case when i % 17 = 0 then null else lpad(to_hex(i), 32, \
-   '0')::uuid end as u from range(50000) t(i)"
+   '0')::uuid end as u, i::double / 8 as wide, 'w' || i as name from range(50000) t(i)"
 ;;
 
 (* DuckDB's own rendering of the file, through casts that make every value an integer,
@@ -23,8 +23,9 @@ let duckdb_csv file =
     Duckdb.query
       ~file
       "select big, small, s, b, (d * 4)::bigint as d, (r * 2)::bigint as r, epoch_ns(ts) \
-       as ts, (dec * 100)::bigint as dec, replace(u::varchar, '-', '') as u from \
-       read_parquet($file, file_row_number = true) order by file_row_number")
+       as ts, (dec * 100)::bigint as dec, replace(u::varchar, '-', '') as u, (wide * \
+       8)::bigint as wide, name from read_parquet($file, file_row_number = true) order \
+       by file_row_number")
 ;;
 
 let reader_csv file =
@@ -38,7 +39,7 @@ let reader_csv file =
   in
   let hex s = String.concat_map s ~f:(fun c -> sprintf "%02x" (Char.to_int c)) in
   let buf = Buffer.create 1024 in
-  Buffer.add_string buf "big,small,s,b,d,r,ts,dec,u\n";
+  Buffer.add_string buf "big,small,s,b,d,r,ts,dec,u,wide,name\n";
   Reader.with_file file ~f:(fun r ->
     Reader.fold_rows r ~init:() ~f:(fun () row ->
       let cells =
@@ -48,6 +49,7 @@ let reader_csv file =
              | 4, _ -> render v ~scale:4.
              | 5, _ -> render v ~scale:2.
              | 8, String u -> hex u
+             | 9, _ -> render v ~scale:8.
              | _ -> render v ~scale:1.))
       in
       Buffer.add_string buf (String.concat ~sep:"," cells);
@@ -71,6 +73,9 @@ let%expect_test "files written by duckdb" =
     ; ", compression zstd, row_group_size 7000"
     ; ", compression snappy"
     ; ", compression lz4_raw"
+    ; ", compression uncompressed, parquet_version v2"
+    ; ", compression zstd, parquet_version v2, row_group_size 7000"
+    ; ", compression snappy, parquet_version v2"
     ]
     ~f:(fun options ->
       Duckdb.with_parquet_file (fun file ->
@@ -93,22 +98,26 @@ let%expect_test "files written by duckdb" =
     , compression zstd, row_group_size 7000: 50001 lines, equal true
     , compression snappy: 50001 lines, equal true
     , compression lz4_raw: 50001 lines, equal true
+    , compression uncompressed, parquet_version v2: 50001 lines, equal true
+    , compression zstd, parquet_version v2, row_group_size 7000: 50001 lines, equal true
+    , compression snappy, parquet_version v2: 50001 lines, equal true
     |}]
 ;;
 
 let%expect_test "what the duckdb files contain" =
-  Duckdb.with_parquet_file (fun file ->
-    copy file ", compression zstd";
-    Reader.with_file file ~f:(fun r ->
-      let meta = Reader.metadata r in
-      List.iter (List.hd_exn meta.row_groups).columns ~f:(fun c ->
-        print_s
-          [%sexp
-            (c.meta_data.path_in_schema : string list)
-            , (c.meta_data.type_ : Metadata.Physical_type.t)
-            , (c.meta_data.encodings : Metadata.Encoding.t list)]);
-      Ok ())
-    |> Or_error.ok_exn);
+  List.iter [ ""; ", parquet_version v2" ] ~f:(fun version ->
+    Duckdb.with_parquet_file (fun file ->
+      copy file (", compression zstd" ^ version);
+      Reader.with_file file ~f:(fun r ->
+        let meta = Reader.metadata r in
+        List.iter (List.hd_exn meta.row_groups).columns ~f:(fun c ->
+          print_s
+            [%sexp
+              (c.meta_data.path_in_schema : string list)
+              , (c.meta_data.type_ : Metadata.Physical_type.t)
+              , (c.meta_data.encodings : Metadata.Encoding.t list)]);
+        Ok ())
+      |> Or_error.ok_exn));
   [%expect
     {|
     ((big) Int64 (Plain))
@@ -120,6 +129,19 @@ let%expect_test "what the duckdb files contain" =
     ((ts) Int64 (Plain))
     ((dec) Int32 (Plain))
     ((u) Fixed_len_byte_array (Plain))
+    ((wide) Double (Plain))
+    ((name) Byte_array (Plain))
+    ((big) Int64 (Delta_binary_packed))
+    ((small) Int32 (Rle_dictionary))
+    ((s) Byte_array (Rle_dictionary))
+    ((b) Boolean (Plain))
+    ((d) Double (Rle_dictionary))
+    ((r) Float (Rle_dictionary))
+    ((ts) Int64 (Delta_binary_packed))
+    ((dec) Int32 (Delta_binary_packed))
+    ((u) Fixed_len_byte_array (Plain))
+    ((wide) Double (Byte_stream_split))
+    ((name) Byte_array (Delta_length_byte_array))
     |}]
 ;;
 
@@ -165,4 +187,40 @@ let%expect_test "malformed compressed input is reported, not read out of bounds"
       (what "output shorter than the declared size") (pos 4)))
     (Ok abcabcabca)
     |}]
+;;
+
+(* DuckDB does not write DELTA_BYTE_ARRAY, so this file comes from pyarrow (see
+   fixtures/make_delta_byte_array.py): v2 pages of at most 512 bytes, so several per
+   column chunk, with nulls. *)
+let%expect_test "DELTA_BYTE_ARRAY fixture" =
+  let file = "fixtures/delta_byte_array.parquet" in
+  let expected =
+    Duckdb.with_output (fun () ->
+      Duckdb.query
+        ~file
+        "select w, n from read_parquet($file, file_row_number = true) order by \
+         file_row_number")
+  in
+  let got =
+    Reader.with_file file ~f:(fun r ->
+      Reader.fold_rows r ~init:[ "w,n" ] ~f:(fun acc row ->
+        String.concat
+          ~sep:","
+          (Array.to_list
+             (Array.map row ~f:(function
+               | V.Null -> "NULL"
+               | String s -> s
+               | Int n -> Int.to_string n
+               | v -> Sexp.to_string [%sexp (v : V.t)])))
+        :: acc))
+    |> Or_error.ok_exn
+    |> List.rev
+    |> List.map ~f:(fun l -> l ^ "\n")
+    |> String.concat
+  in
+  printf
+    "%d lines, equal %b\n"
+    (List.length (String.split_lines got))
+    (String.equal expected got);
+  [%expect {| 301 lines, equal true |}]
 ;;

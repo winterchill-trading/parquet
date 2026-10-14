@@ -1,6 +1,8 @@
 (library
  (name parquet_test)
  (inline_tests
+  (deps
+   (glob_files fixtures/*.parquet))
   (flags
    (:standard -source-tree-root .)))
  (libraries
