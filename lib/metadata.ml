@@ -489,6 +489,47 @@ module Dictionary_page_header = struct
   ;;
 end
 
+module Data_page_header_v2 = struct
+  type t =
+    { num_values : int
+    ; num_nulls : int
+    ; num_rows : int
+    ; encoding : Encoding.t
+    ; definition_levels_byte_length : int
+    ; repetition_levels_byte_length : int
+    ; is_compressed : bool
+    ; statistics : Statistics.t option
+    }
+  [@@deriving sexp_of]
+
+  let to_thrift t =
+    struct_
+      [ req 1 (Thrift_compact.i32 t.num_values)
+      ; req 2 (Thrift_compact.i32 t.num_nulls)
+      ; req 3 (Thrift_compact.i32 t.num_rows)
+      ; req 4 (Encoding.to_thrift t.encoding)
+      ; req 5 (Thrift_compact.i32 t.definition_levels_byte_length)
+      ; req 6 (Thrift_compact.i32 t.repetition_levels_byte_length)
+      ; req 7 (Thrift_compact.Bool t.is_compressed)
+      ; opt 8 Statistics.to_thrift t.statistics
+      ]
+  ;;
+
+  let of_thrift v =
+    let f = fields "data page header v2" v in
+    let int id what = required f id what (get_int what) in
+    { num_values = int 1 "num_values"
+    ; num_nulls = int 2 "num_nulls"
+    ; num_rows = int 3 "num_rows"
+    ; encoding = required f 4 "encoding" Encoding.of_thrift
+    ; definition_levels_byte_length = int 5 "definition_levels_byte_length"
+    ; repetition_levels_byte_length = int 6 "repetition_levels_byte_length"
+    ; is_compressed = Option.value (optional f 7 (get_bool "is_compressed")) ~default:true
+    ; statistics = optional f 8 Statistics.of_thrift
+    }
+  ;;
+end
+
 module Page_header = struct
   type t =
     { type_ : Page_type.t
@@ -496,6 +537,7 @@ module Page_header = struct
     ; compressed_page_size : int
     ; data_page_header : Data_page_header.t option
     ; dictionary_page_header : Dictionary_page_header.t option
+    ; data_page_header_v2 : Data_page_header_v2.t option
     }
   [@@deriving sexp_of]
 
@@ -506,6 +548,7 @@ module Page_header = struct
       ; req 3 (Thrift_compact.i32 t.compressed_page_size)
       ; opt 5 Data_page_header.to_thrift t.data_page_header
       ; opt 7 Dictionary_page_header.to_thrift t.dictionary_page_header
+      ; opt 8 Data_page_header_v2.to_thrift t.data_page_header_v2
       ]
   ;;
 
@@ -518,6 +561,7 @@ module Page_header = struct
         required f 3 "compressed_page_size" (get_int "compressed_page_size")
     ; data_page_header = optional f 5 Data_page_header.of_thrift
     ; dictionary_page_header = optional f 7 Dictionary_page_header.of_thrift
+    ; data_page_header_v2 = optional f 8 Data_page_header_v2.of_thrift
     }
   ;;
 end

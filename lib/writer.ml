@@ -668,6 +668,7 @@ let write_column_chunk t column chunk ~num_rows : M.Column_chunk.t =
               ; encoding = Plain_dictionary
               ; is_sorted = None
               }
+        ; data_page_header_v2 = None
         }
       in
       write_page t ~page d.entries)
@@ -688,6 +689,7 @@ let write_column_chunk t column chunk ~num_rows : M.Column_chunk.t =
           ; statistics = Some finished.statistics
           }
     ; dictionary_page_header = None
+    ; data_page_header_v2 = None
     }
   in
   let data_page_offset = t.pos in

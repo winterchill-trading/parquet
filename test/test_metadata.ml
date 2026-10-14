@@ -66,6 +66,7 @@ let%expect_test "data page header with statistics" =
                  Some { null_count = Some 0; min_value = Some "a"; max_value = Some "z" }
              }
        ; dictionary_page_header = None
+       ; data_page_header_v2 = None
        });
   [%expect
     {| 15 00 15 20 15 20 2c 15 04 15 00 15 06 15 06 1c 36 00 28 01 7a 18 01 61 00 00 00 |}]
@@ -121,6 +122,7 @@ let%expect_test "of_thrift inverts to_thrift" =
     ; data_page_header = None
     ; dictionary_page_header =
         Some { num_values = 3; encoding = Plain_dictionary; is_sorted = Some false }
+    ; data_page_header_v2 = None
     };
   round_trip
     File_meta_data.to_thrift

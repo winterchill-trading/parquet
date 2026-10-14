@@ -196,6 +196,7 @@ let write_column_chunk t column chunk ~num_rows : M.Column_chunk.t =
           ; statistics = Some statistics
           }
     ; dictionary_page_header = None
+    ; data_page_header_v2 = None
     }
   in
   let header = Thrift_compact.to_string (M.Page_header.to_thrift header) in

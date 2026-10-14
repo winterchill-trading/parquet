@@ -219,6 +219,25 @@ module Dictionary_page_header : sig
   val of_thrift : Thrift_compact.t -> t
 end
 
+module Data_page_header_v2 : sig
+  (** Levels are stored uncompressed before the values, with their byte lengths here;
+      [is_compressed] (default [true]) says whether the values section is. *)
+  type t =
+    { num_values : int
+    ; num_nulls : int
+    ; num_rows : int
+    ; encoding : Encoding.t
+    ; definition_levels_byte_length : int
+    ; repetition_levels_byte_length : int
+    ; is_compressed : bool
+    ; statistics : Statistics.t option
+    }
+  [@@deriving sexp_of]
+
+  val to_thrift : t -> Thrift_compact.t
+  val of_thrift : Thrift_compact.t -> t
+end
+
 module Page_header : sig
   type t =
     { type_ : Page_type.t
@@ -226,6 +245,7 @@ module Page_header : sig
     ; compressed_page_size : int
     ; data_page_header : Data_page_header.t option
     ; dictionary_page_header : Dictionary_page_header.t option
+    ; data_page_header_v2 : Data_page_header_v2.t option
     }
   [@@deriving sexp_of]
 
