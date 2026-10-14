@@ -164,7 +164,12 @@ let decompress (codec : M.Compression_codec.t) body ~uncompressed_size =
     let out = Zstd.decompress uncompressed_size body in
     if String.length out <> uncompressed_size then fail0 "zstd page size mismatch";
     out
-  | (Snappy | Gzip | Lzo | Brotli | Lz4 | Lz4_raw) as codec ->
+  | Snappy ->
+    let out = Decompress.snappy body in
+    if String.length out <> uncompressed_size then fail0 "snappy page size mismatch";
+    out
+  | Lz4_raw -> Decompress.lz4_raw body ~uncompressed_size
+  | (Gzip | Lzo | Brotli | Lz4) as codec ->
     fail "unsupported compression codec" [%message (codec : M.Compression_codec.t)]
 ;;
 
