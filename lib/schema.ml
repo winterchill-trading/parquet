@@ -10,13 +10,21 @@ module Column = struct
       | Boolean of ('a -> bool)
   end
 
+  module Kind = struct
+    type 'a t =
+      | Required of 'a Accessor.t
+      | Optional : ('a -> 'b option) * 'b Accessor.t -> 'a t
+  end
+
   type 'a t =
-    { accessor : 'a Accessor.t
+    { kind : 'a Kind.t
     ; schema_element : Metadata.Schema_element.t
+    ; dictionary : bool
     }
 
   let leaf ?converted_type ?scale ?precision ?logical_type name type_ accessor =
-    { accessor
+    { kind = Required accessor
+    ; dictionary = false
     ; schema_element =
         { type_ = Some type_
         ; type_length = None
@@ -70,8 +78,59 @@ module Column = struct
 
   let bool name f = leaf name Boolean (Boolean f)
   let name t = t.schema_element.name
-  let accessor t = t.accessor
+  let kind t = t.kind
   let schema_element t = t.schema_element
+  let is_dictionary t = t.dictionary
+
+  let is_optional t =
+    match t.kind with
+    | Required _ -> false
+    | Optional _ -> true
+  ;;
+
+  let optional make name f =
+    let inner = make name Fn.id in
+    match inner.kind with
+    | Optional _ ->
+      raise_s
+        [%message "Parquet.Schema.Column.optional: already optional" (name : string)]
+    | Required accessor ->
+      { inner with
+        kind = Optional (f, accessor)
+      ; schema_element = { inner.schema_element with repetition_type = Some Optional }
+      }
+  ;;
+
+  let dictionary t =
+    match t.kind with
+    | Required (Boolean _) | Optional (_, Boolean _) ->
+      raise_s
+        [%message
+          "Parquet.Schema.Column.dictionary: not for boolean columns"
+            ~name:(name t : string)]
+    | Required _ | Optional _ -> { t with dictionary = true }
+  ;;
+
+  let[@cold] absent name =
+    raise_s [%message "Parquet.Schema.Column.accessor: value absent" (name : string)]
+  ;;
+
+  let accessor (type a) (t : a t) : a Accessor.t =
+    match t.kind with
+    | Required accessor -> accessor
+    | Optional (f, accessor) ->
+      let get row =
+        match f row with
+        | Some v -> v
+        | None -> absent (name t)
+      in
+      (match accessor with
+       | Int32 g -> Int32 (fun row -> g (get row))
+       | Int64 g -> Int64 (fun row -> g (get row))
+       | Double g -> Double (fun row -> g (get row))
+       | Byte_array g -> Byte_array (fun row -> g (get row))
+       | Boolean g -> Boolean (fun row -> g (get row)))
+  ;;
 
   let physical_type t =
     match t.schema_element.type_ with

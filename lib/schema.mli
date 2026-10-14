@@ -1,7 +1,25 @@
 (** Typed description of the columns of a file whose rows are values of type ['a]. Each
     column has a name and an accessor that extracts its value from a row.
 
-    All columns are [REQUIRED]: nullable and nested columns are not supported. *)
+    {[
+      type trade =
+        { ts : Time_ns.t
+        ; coin : string
+        ; px : int option
+        }
+
+      let schema =
+        Parquet.Schema.create
+          Parquet.Schema.Column.
+            [ timestamp_ns "ts" (fun t -> t.ts)
+            ; dictionary (utf8 "coin" (fun t -> t.coin))
+            ; optional (decimal ~precision:18 ~scale:6) "px" (fun t -> t.px)
+            ]
+      ;;
+    ]}
+
+    Columns are [REQUIRED] unless built with {!Column.optional}. Nested and repeated
+    columns are not supported. *)
 
 open! Core
 
@@ -40,7 +58,43 @@ module Column : sig
   (** Parquet [BOOLEAN], bit-packed. *)
   val bool : string -> ('a -> bool) -> 'a t
 
+  (** [optional make name f] is the [OPTIONAL] (nullable) column [make name], whose value
+      for a row is [f row] and null when that is [None]. [make] is one of the combinators
+      above, partially applied if it takes parameters:
+
+      {[
+        optional
+          int64
+          "qty"
+          (fun r -> r.qty)
+          optional
+          (decimal ~precision:18 ~scale:6)
+          "px"
+          (fun r -> r.px)
+          optional
+          timestamp_ns
+          "closed_at"
+          (fun r -> r.closed_at)
+      ]}
+
+      Nulls are written as definition levels (RLE/bit-packed hybrid, bit width 1) and
+      counted in the [null_count] statistic; only present values are encoded.
+
+      @raise if [make] already builds an optional column. *)
+  val optional : (string -> ('b -> 'b) -> 'b t) -> string -> ('a -> 'b option) -> 'a t
+
+  (** Dictionary-encode the column: each column chunk gets a dictionary page with the
+      distinct values (PLAIN) and the data page holds their indices (RLE/bit-packed
+      hybrid). Worth it for low-cardinality columns (symbols, venues, enums). If a chunk's
+      dictionary grows past 1 MiB the chunk falls back to PLAIN. The writer keeps a hash
+      table per chunk, so rows cost a few words of allocation more than PLAIN columns.
+
+      @raise on a boolean column. *)
+  val dictionary : 'a t -> 'a t
+
   val name : _ t -> string
+  val is_optional : _ t -> bool
+  val is_dictionary : _ t -> bool
 
   (** How the writer reads a value of this column. *)
   module Accessor : sig
@@ -52,7 +106,19 @@ module Column : sig
       | Boolean of ('a -> bool)
   end
 
+  (** For an optional column, the accessor raises on rows whose value is [None]; use
+      {!kind} to tell the two apart. *)
   val accessor : 'a t -> 'a Accessor.t
+
+  (** How the writer reads a row: the value, or for an optional column the option and the
+      accessor of the present value. *)
+  module Kind : sig
+    type 'a t =
+      | Required of 'a Accessor.t
+      | Optional : ('a -> 'b option) * 'b Accessor.t -> 'a t
+  end
+
+  val kind : 'a t -> 'a Kind.t
   val physical_type : _ t -> Metadata.Physical_type.t
   val schema_element : _ t -> Metadata.Schema_element.t
 end
