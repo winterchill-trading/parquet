@@ -18,7 +18,8 @@ jobs:
       - run: opam exec -- dune test
       - name: Run the worked example
         run: opam exec -- dune exec examples/trades.exe -- "$RUNNER_TEMP/trades.parquet"
-      - run: opam install -y odoc
+      # odoc does not declare result; the local switch only had it transitively.
+      - run: opam install -y result odoc
       - name: Build API docs (odoc warnings fail the step)
         env:
           ODOC_WARN_ERROR: "true"
