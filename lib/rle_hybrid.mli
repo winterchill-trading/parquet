@@ -16,12 +16,12 @@ val bit_width : max_value:int -> int
     [get (len - 1)] to [buf], with no length prefix. Runs of 8 or more equal values become
     RLE runs, the rest bit-packed runs; the last bit-packed group is padded with zeros.
 
-    @raise if [bit_width] is outside [1, 32] or a value does not fit in it. *)
+    Raises if [bit_width] is outside [1, 32] or a value does not fit in it. *)
 val encode : bit_width:int -> len:int -> get:(int -> int) -> Byte_buf.t -> unit
 
 (** [decode ~bit_width s ~pos ~stop ~len] reads [len] values from the bytes of [s] between
     [pos] (inclusive) and [stop] (exclusive). Returns the values and the position after
     the last run read.
 
-    @raise if the stream ends before [len] values or a run is malformed. *)
+    Raises if the stream ends before [len] values or a run is malformed. *)
 val decode : bit_width:int -> string -> pos:int -> stop:int -> len:int -> int array * int

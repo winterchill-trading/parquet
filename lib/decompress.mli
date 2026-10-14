@@ -10,11 +10,11 @@ open! Core
 (** Raw Snappy block format (as Parquet uses it, without the framing format): a varint
     uncompressed length, then literals and back-references.
 
-    @raise on malformed input. *)
+    Raises on malformed input. *)
 val snappy : string -> string
 
 (** LZ4 block format ([LZ4_RAW] in Parquet), which does not record the decompressed size;
     [uncompressed_size] comes from the page header.
 
-    @raise on malformed input or if the output is not exactly [uncompressed_size] bytes. *)
+    Raises on malformed input or if the output is not exactly [uncompressed_size] bytes. *)
 val lz4_raw : string -> uncompressed_size:int -> string

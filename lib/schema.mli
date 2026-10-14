@@ -82,7 +82,7 @@ module Column : sig
       Nulls are written as definition levels (RLE/bit-packed hybrid, bit width 1) and
       counted in the [null_count] statistic; only present values are encoded.
 
-      @raise if [make] already builds an optional column. *)
+      Raises if [make] already builds an optional column. *)
   val optional : (string -> ('b -> 'b) -> 'b t) -> string -> ('a -> 'b option) -> 'a t
 
   (** Dictionary-encode the column: each column chunk gets a dictionary page with the
@@ -91,7 +91,7 @@ module Column : sig
       dictionary grows past 1 MiB the chunk falls back to PLAIN. The writer keeps a hash
       table per chunk, so rows cost a few words of allocation more than PLAIN columns.
 
-      @raise on a boolean column. *)
+      Raises on a boolean column. *)
   val dictionary : 'a t -> 'a t
 
   (** {2 Inspection} *)
@@ -139,7 +139,7 @@ type 'a t
 
 (** The schema of rows of type ['a], with the columns in file order.
 
-    @raise on an empty column list or duplicate column names. *)
+    Raises on an empty column list or duplicate column names. *)
 val create : 'a Column.t list -> 'a t
 
 (** The columns, in file order. *)

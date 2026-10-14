@@ -39,7 +39,7 @@ val type_of : t -> Type.t
 
 (** [I32] of an [int].
 
-    @raise if the value does not fit in 32 bits. *)
+    Raises if the value does not fit in 32 bits. *)
 val i32 : int -> t
 
 (** [I64] of an [int]. *)
@@ -67,10 +67,10 @@ val to_string : t -> string
     the position just after its stop byte. Field ids are absolute in the result. Sets are
     read as lists; maps are not supported (Parquet's metadata has none).
 
-    @raise if the input is truncated or malformed, or nests deeper than 64 levels. *)
+    Raises if the input is truncated or malformed, or nests deeper than 64 levels. *)
 val read_struct : string -> pos:int -> t * int
 
 (** [of_string s] reads one struct that must span all of [s].
 
-    @raise like {!read_struct}, and if bytes are left over. *)
+    Raises like {!read_struct}, and if bytes are left over. *)
 val of_string : string -> t

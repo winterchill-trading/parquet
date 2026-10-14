@@ -22,7 +22,7 @@ type 'a t
     [`Zstd] compresses each page at zstd level 3. [key_value_metadata] (default none) is
     written to the footer as application-defined key-value pairs.
 
-    @raise if [row_group_rows < 1] or the file cannot be created. *)
+    Raises if [row_group_rows < 1] or the file cannot be created. *)
 val create
   :  schema:'a Schema.t
   -> ?row_group_rows:int
@@ -33,7 +33,7 @@ val create
 
 (** Append one row; writes a row group when [row_group_rows] rows are buffered.
 
-    @raise if the writer is closed, or a value does not fit its column ([int32] range). *)
+    Raises if the writer is closed, or a value does not fit its column ([int32] range). *)
 val add : 'a t -> 'a -> unit
 
 (** [List.iter rows ~f:(add t)]. *)
@@ -86,7 +86,7 @@ module Direct : sig
 
   (** Give the row a null in an {!Schema.Column.optional} column.
 
-      @raise if the column is not optional. *)
+      Raises if the column is not optional. *)
   val add_null_int : int_column -> unit
 
   (** See {!add_null_int}. *)
