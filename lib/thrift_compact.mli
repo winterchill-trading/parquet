@@ -54,3 +54,17 @@ val write_uvarint : Buffer.t -> int64 -> unit
 val write : Buffer.t -> t -> unit
 
 val to_string : t -> string
+
+(** {2 Reading} *)
+
+(** [read_struct s ~pos] reads the struct that starts at [pos] in [s] and returns it with
+    the position just after its stop byte. Field ids are absolute in the result. Sets are
+    read as lists; maps are not supported (Parquet's metadata has none).
+
+    @raise if the input is truncated or malformed, or nests deeper than 64 levels. *)
+val read_struct : string -> pos:int -> t * int
+
+(** [of_string s] reads one struct that must span all of [s].
+
+    @raise like {!read_struct}, and if bytes are left over. *)
+val of_string : string -> t
