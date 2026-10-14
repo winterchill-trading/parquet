@@ -6,7 +6,9 @@ open Parquet
 module M = Metadata
 
 let magic = "PAR1"
-let created_by = "parquet-ocaml version 0.1.0"
+(* [dune subst] (run by dune-release and by opam for pinned dev builds) fills in the
+   version from the git tag. *)
+let created_by = "parquet-ocaml version %%VERSION_NUM%%"
 let zstd_level = 3
 
 (* Per-column buffer for the current row group, with running statistics. *)
