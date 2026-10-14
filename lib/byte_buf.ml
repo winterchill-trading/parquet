@@ -91,4 +91,20 @@ let[@inline] add_string t s =
   t.len <- pos + n
 ;;
 
+let add_bytes t src ~pos ~len =
+  if pos < 0 || len < 0 || pos + len > Bytes.length src
+  then
+    raise_s [%message "Parquet.Byte_buf.add_bytes: out of bounds" (pos : int) (len : int)];
+  let at = t.len in
+  let { bytes; cap = _ } = reserve t len in
+  Bytes.blit ~src ~src_pos:pos ~dst:bytes ~dst_pos:at ~len;
+  t.len <- at + len
+;;
+
+let set_int32_le t ~pos n =
+  if pos < 0 || pos + 4 > t.len
+  then raise_s [%message "Parquet.Byte_buf.set_int32_le: out of bounds" (pos : int)];
+  unsafe_set_int32 t.storage.bytes pos (int32_le (Int32.of_int_trunc n))
+;;
+
 let contents t = Bytes.To_string.sub t.storage.bytes ~pos:0 ~len:t.len

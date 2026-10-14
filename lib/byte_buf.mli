@@ -24,4 +24,16 @@ val add_double_le : t -> float -> unit
 val add_double_u_le : t -> float# -> unit
 
 val add_string : t -> string -> unit
+(** Append [len] bytes of [src] from [pos].
+
+    @raise if the range is outside [src]. *)
+val add_bytes : t -> Bytes.t -> pos:int -> len:int -> unit
+
+(** Overwrite the 4 bytes at [pos] (already appended) with [n], for a length prefix
+    written before its contents are known.
+
+    @raise if [pos + 4 > length t]. *)
+val set_int32_le : t -> pos:int -> int -> unit
+
+(** A copy of the first [length t] bytes. *)
 val contents : t -> string
