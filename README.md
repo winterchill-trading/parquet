@@ -261,6 +261,8 @@ repository:
 The version lives only in `CHANGES.md` and the tag: `dune subst` fills in the
 `created_by` string the writer puts in the footer.
 
+API docs are built with `dune build @doc` (odoc). CI fails on any odoc warning, so run it before tagging.
+
 ## CI
 
 CI builds on the OxCaml switch (cached between runs), installs the DuckDB CLI
