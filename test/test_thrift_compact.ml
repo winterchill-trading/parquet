@@ -77,3 +77,75 @@ let%expect_test "out of order field ids are rejected" =
        : string Or_error.t)];
   [%expect {| (Error ("Thrift_compact: field ids must increase" (id 1))) |}]
 ;;
+
+(* [read_struct] must invert [write] for every value shape the writer produces. *)
+let rec gen_value ~depth : T.t Quickcheck.Generator.t =
+  let open Quickcheck.Generator.Let_syntax in
+  let scalar =
+    Quickcheck.Generator.union
+      [ (Bool.quickcheck_generator >>| fun b -> T.Bool b)
+      ; (Int.gen_incl 0 255 >>| fun n -> T.Byte n)
+      ; (Int.gen_incl (-32768) 32767 >>| fun n -> T.I16 n)
+      ; (Int32.quickcheck_generator >>| fun n -> T.I32 n)
+      ; (Int64.quickcheck_generator >>| fun n -> T.I64 n)
+      ; (Float.gen_finite >>| fun x -> T.Double x)
+      ; (String.quickcheck_generator >>| fun s -> T.Binary s)
+      ]
+  in
+  if depth >= 3
+  then scalar
+  else
+    Quickcheck.Generator.union
+      [ scalar
+      ; gen_struct ~depth:(depth + 1)
+      ; (let%bind elem = gen_value ~depth:(depth + 1) in
+         let ty = T.type_of elem in
+         let%map rest =
+           List.gen_with_length 20 (gen_value ~depth:(depth + 1))
+           >>| List.filter ~f:(fun v -> T.Type.equal (T.type_of v) ty)
+         in
+         T.List (ty, elem :: rest))
+      ]
+
+and gen_struct ~depth =
+  let open Quickcheck.Generator.Let_syntax in
+  let%map fields =
+    List.gen_with_length 4 (Quickcheck.Generator.tuple2 (Int.gen_incl 1 40) (gen_value ~depth))
+  in
+  let fields =
+    List.dedup_and_sort fields ~compare:(fun (a, _) (b, _) -> Int.compare a b)
+  in
+  T.Struct fields
+;;
+
+let%test_unit "read_struct inverts write" =
+  Quickcheck.test
+    (gen_struct ~depth:0)
+    ~sexp_of:T.sexp_of_t
+    ~f:(fun v ->
+      let s = T.to_string v in
+      [%test_result: Sexp.t] (T.sexp_of_t (T.of_string s)) ~expect:(T.sexp_of_t v))
+;;
+
+let%expect_test "large field ids and long lists" =
+  let v =
+    T.Struct
+      [ 1, T.List (I32, List.init 20 ~f:T.i32)
+      ; 100, T.Bool false
+      ; 101, T.List (Bool, [ Bool true; Bool false ])
+      ]
+  in
+  print_s [%sexp (T.sexp_of_t (T.of_string (T.to_string v)) |> Sexp.equal (T.sexp_of_t v) : bool)];
+  [%expect {| true |}]
+;;
+
+let%expect_test "malformed input is reported" =
+  let show s =
+    print_s [%sexp (Or_error.try_with (fun () -> T.of_string s) : T.t Or_error.t)]
+  in
+  show "";
+  show "\x18\x05abc";
+  show "\x1b\x01\x00";
+  show "\x00\x00";
+  [%expect {| |}]
+;;
