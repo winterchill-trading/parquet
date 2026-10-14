@@ -53,7 +53,9 @@ val add_all : 'a t -> 'a list -> unit
       Writer.Direct.end_row w
     ]} *)
 module Direct : sig
+  (** A column of the writer, looked up by name, of the OCaml type its values have. *)
   type int_column
+
   type float_column
   type string_column
   type bool_column
@@ -74,8 +76,12 @@ module Direct : sig
   (** Boxes [float] at the call unless the call is inlined; [add_float_u] never does. *)
   val add_float : float_column -> float -> unit
 
+  (** {!add_float} for an unboxed float. *)
   val add_float_u : float_column -> float# -> unit
+
+  (** For [utf8] columns the string must be valid UTF-8; it is not checked. *)
   val add_string : string_column -> string -> unit
+
   val add_bool : bool_column -> bool -> unit
 
   (** Give the row a null in an {!Schema.Column.optional} column.
@@ -83,8 +89,13 @@ module Direct : sig
       @raise if the column is not optional. *)
   val add_null_int : int_column -> unit
 
+  (** See {!add_null_int}. *)
   val add_null_float : float_column -> unit
+
+  (** See {!add_null_int}. *)
   val add_null_string : string_column -> unit
+
+  (** See {!add_null_int}. *)
   val add_null_bool : bool_column -> unit
 
   (** Ends the row. Raises if a column did not get exactly one value since the previous
@@ -95,7 +106,8 @@ end
 (** Number of rows added so far. *)
 val num_rows : _ t -> int
 
-(** Flush the last row group, write the footer and close the file. *)
+(** Flush the last row group, write the footer and close the file. Calling it again does
+    nothing. Without [close] the file has no footer and no reader accepts it. *)
 val close : _ t -> unit
 
 (** [with_file ~schema path ~f] creates a writer, runs [f] and closes it, also when [f]

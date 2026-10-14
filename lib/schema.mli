@@ -58,6 +58,8 @@ module Column : sig
   (** Parquet [BOOLEAN], bit-packed. *)
   val bool : string -> ('a -> bool) -> 'a t
 
+  (** {2 Nulls and encodings} *)
+
   (** [optional make name f] is the [OPTIONAL] (nullable) column [make name], whose value
       for a row is [f row] and null when that is [None]. [make] is one of the combinators
       above, partially applied if it takes parameters:
@@ -92,8 +94,14 @@ module Column : sig
       @raise on a boolean column. *)
   val dictionary : 'a t -> 'a t
 
+  (** {2 Inspection} *)
+
   val name : _ t -> string
+
+  (** Whether the column was built with {!optional}. *)
   val is_optional : _ t -> bool
+
+  (** Whether the column was passed through {!dictionary}. *)
   val is_dictionary : _ t -> bool
 
   (** How the writer reads a value of this column. *)
@@ -119,15 +127,22 @@ module Column : sig
   end
 
   val kind : 'a t -> 'a Kind.t
+
+  (** The Parquet physical type the values are stored as. *)
   val physical_type : _ t -> Metadata.Physical_type.t
+
+  (** The footer's description of the column. *)
   val schema_element : _ t -> Metadata.Schema_element.t
 end
 
 type 'a t
 
-(** Raises on an empty column list or duplicate column names. *)
+(** The schema of rows of type ['a], with the columns in file order.
+
+    @raise on an empty column list or duplicate column names. *)
 val create : 'a Column.t list -> 'a t
 
+(** The columns, in file order. *)
 val columns : 'a t -> 'a Column.t list
 
 (** The flattened schema written to the footer: a root element followed by one element per
