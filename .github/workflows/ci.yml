@@ -16,5 +16,7 @@ jobs:
       - uses: winterchill-trading/infra/.github/actions/ox-setup@main
       - run: opam exec -- dune build
       - run: opam exec -- dune test
+      - name: Run the worked example
+        run: opam exec -- dune exec examples/trades.exe -- "$RUNNER_TEMP/trades.parquet"
   obj-magic:
     uses: winterchill-trading/infra/.github/workflows/obj-magic.yml@main
