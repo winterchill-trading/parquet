@@ -69,6 +69,8 @@ let%expect_test "files written by duckdb" =
     [ ", compression uncompressed"
     ; ", compression zstd"
     ; ", compression zstd, row_group_size 7000"
+    ; ", compression snappy"
+    ; ", compression lz4_raw"
     ]
     ~f:(fun options ->
       Duckdb.with_parquet_file (fun file ->
@@ -89,6 +91,8 @@ let%expect_test "files written by duckdb" =
     , compression uncompressed: 50001 lines, equal true
     , compression zstd: 50001 lines, equal true
     , compression zstd, row_group_size 7000: 50001 lines, equal true
+    , compression snappy: 50001 lines, equal true
+    , compression lz4_raw: 50001 lines, equal true
     |}]
 ;;
 
@@ -121,7 +125,7 @@ let%expect_test "what the duckdb files contain" =
 
 let%expect_test "unsupported codecs are reported" =
   Duckdb.with_parquet_file (fun file ->
-    copy file ", compression snappy";
+    copy file ", compression gzip";
     Reader.with_file file ~f:(fun r -> Reader.read_column r ~row_group:0 "big")
     |> Result.map ~f:(fun _ -> ())
     |> [%sexp_of: unit Or_error.t]
@@ -132,6 +136,33 @@ let%expect_test "unsupported codecs are reported" =
     {|
     (Error
      ($file
-      ("Parquet.Reader: unsupported compression codec" (codec Snappy))))
+      ("Parquet.Reader: unsupported compression codec" (codec Gzip))))
+    |}]
+;;
+
+let%expect_test "malformed compressed input is reported, not read out of bounds" =
+  let show f = print_s [%sexp (Or_error.try_with f : string Or_error.t)] in
+  (* Declares 10 bytes, then copies from before the start. *)
+  show (fun () -> Decompress.snappy "\x0a\x05\x05");
+  (* A literal longer than the input. *)
+  show (fun () -> Decompress.snappy "\x0a\x24ab");
+  (* "abcabcabca": three literals, then an overlapping copy of 7 from 3 back. *)
+  show (fun () -> Decompress.snappy "\x0a\x08abc\x0d\x03");
+  show (fun () -> Decompress.lz4_raw "\x30abc" ~uncompressed_size:4);
+  (* Three literals, then a match of 4 + 3 from offset 3, then an empty last literal run. *)
+  show (fun () -> Decompress.lz4_raw "\x33abc\x03\x00\x00" ~uncompressed_size:10);
+  [%expect
+    {|
+    (Error
+     ("Parquet.Decompress: malformed input" (codec snappy) (what "copy offset")
+      (pos 3)))
+    (Error
+     ("Parquet.Decompress: malformed input" (codec snappy)
+      (what "literal past the input") (pos 2)))
+    (Ok abcabcabca)
+    (Error
+     ("Parquet.Decompress: malformed input" (codec lz4_raw)
+      (what "output shorter than the declared size") (pos 4)))
+    (Ok abcabcabca)
     |}]
 ;;
