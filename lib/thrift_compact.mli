@@ -34,17 +34,22 @@ type t =
   | Struct of (int * t) list
 [@@deriving sexp_of]
 
+(** The wire type of a value, as used in list headers. *)
 val type_of : t -> Type.t
 
-(** Convenience constructors. [i32] raises if the value does not fit in 32 bits. *)
+(** [I32] of an [int].
+
+    @raise if the value does not fit in 32 bits. *)
 val i32 : int -> t
 
+(** [I64] of an [int]. *)
 val i64 : int -> t
+
+(** [Binary]. *)
 val binary : string -> t
 
-(** Zigzag mapping of signed to unsigned integers: 0, -1, 1, -2 map to 0, 1, 2,
-
-    3. *)
+(** Zigzag mapping of signed to unsigned integers: [0], [-1], [1], [-2] map to [0],
+    [1] , [2], [3]. *)
 val zigzag64 : int64 -> int64
 
 (** Append an unsigned LEB128 varint (the argument is read as unsigned). *)
@@ -53,6 +58,7 @@ val write_uvarint : Buffer.t -> int64 -> unit
 (** Append the encoding of a value. A [Struct] is terminated by its stop byte. *)
 val write : Buffer.t -> t -> unit
 
+(** {!write} into a fresh string. *)
 val to_string : t -> string
 
 (** {2 Reading} *)
