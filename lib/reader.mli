@@ -2,14 +2,15 @@
     [REQUIRED] or [OPTIONAL]. Covers what {!Writer} writes and the common subset other
     writers produce (DuckDB, Arrow with default settings):
 
-    - v1 data pages and dictionary pages, several pages per column chunk;
-    - PLAIN, PLAIN_DICTIONARY / RLE_DICTIONARY and RLE (booleans) encodings;
+    - v1 and v2 data pages and dictionary pages, several pages per column chunk;
+    - PLAIN, PLAIN_DICTIONARY / RLE_DICTIONARY, RLE (booleans), DELTA_BINARY_PACKED,
+      DELTA_LENGTH_BYTE_ARRAY, DELTA_BYTE_ARRAY and BYTE_STREAM_SPLIT encodings;
     - definition levels (RLE/bit-packed hybrid);
-    - uncompressed and zstd pages;
+    - uncompressed, zstd, snappy and lz4_raw pages;
     - all physical types but the deprecated INT96.
 
-    Not supported, reported as errors: nested or repeated columns, data page v2, DELTA and
-    BYTE_STREAM_SPLIT encodings, codecs other than zstd, encrypted files.
+    Not supported, reported as errors: nested or repeated columns, the gzip, brotli and
+    legacy lz4 codecs, encrypted files.
 
     Values come back untyped ({!Value.t}), one array per column chunk; the logical type
     (timestamp unit, decimal scale, UTF-8) is in {!columns}.

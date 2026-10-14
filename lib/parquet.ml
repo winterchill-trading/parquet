@@ -8,3 +8,4 @@ module Rle_hybrid = Rle_hybrid
 module Byte_buf = Byte_buf
 module Zstd_bytes = Zstd_bytes
 module Decompress = Decompress
+module Delta = Delta

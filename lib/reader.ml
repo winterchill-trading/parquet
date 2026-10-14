@@ -173,75 +173,88 @@ let decompress (codec : M.Compression_codec.t) body ~uncompressed_size =
     fail "unsupported compression codec" [%message (codec : M.Compression_codec.t)]
 ;;
 
-(* Values of one v1 data page: [n] slots, nulls where the definition level is 0. *)
-let decode_data_page
+let is_optional (column : M.Schema_element.t) =
+  match column.repetition_type with
+  | Some Optional -> true
+  | Some Required | Some Repeated | None -> false
+;;
+
+let int_of_int64 (column : M.Schema_element.t) v : Value.t =
+  match column.type_ with
+  | Some Int32 -> Int (Int32.to_int_trunc (Int64.to_int32_trunc v))
+  | _ ->
+    (match Int64.to_int v with
+     | Some v -> Int v
+     | None -> fail "INT64 value outside the int range" [%message column.name (v : int64)])
+;;
+
+(* [present] values encoded with [encoding] in [s] from [pos]. *)
+let decode_values
   (column : M.Schema_element.t)
   ~dictionary
-  (header : M.Data_page_header.t)
-  page
+  ~(encoding : M.Encoding.t)
+  s
+  ~pos
+  ~present
   : Value.t array
   =
-  let n = header.num_values in
-  let optional =
-    match column.repetition_type with
-    | Some Optional -> true
-    | Some Required | Some Repeated | None -> false
+  let stop = String.length s in
+  let check_count values =
+    if Array.length values < present
+    then fail "fewer values than the levels say" [%message column.name];
+    values
   in
-  let levels, pos =
-    if optional
-    then (
-      let len = int32_le page 0 in
-      let levels, _ = Rle_hybrid.decode ~bit_width:1 page ~pos:4 ~stop:(4 + len) ~len:n in
-      Some levels, 4 + len)
-    else None, 0
-  in
-  let present =
-    match levels with
-    | None -> n
-    | Some levels -> Array.count levels ~f:(fun l -> l = 1)
-  in
-  let values =
-    match header.encoding with
-    | Plain -> fst (decode_plain column page ~pos ~n:present)
-    | Plain_dictionary | Rle_dictionary ->
-      let dictionary =
-        match dictionary with
-        | Some d -> d
-        | None ->
-          fail "dictionary-encoded page without a dictionary" [%message column.name]
-      in
-      if pos >= String.length page && present > 0
-      then fail "truncated values" [%message column.name];
-      let bit_width = if present = 0 then 0 else Char.to_int page.[pos] in
-      let indices, _ =
-        if present = 0
-        then [||], pos
-        else
-          Rle_hybrid.decode
-            ~bit_width
-            page
-            ~pos:(pos + 1)
-            ~stop:(String.length page)
-            ~len:present
-      in
+  match encoding with
+  | Plain -> fst (decode_plain column s ~pos ~n:present)
+  | Plain_dictionary | Rle_dictionary ->
+    let dictionary =
+      match dictionary with
+      | Some d -> d
+      | None -> fail "dictionary-encoded page without a dictionary" [%message column.name]
+    in
+    if present = 0
+    then [||]
+    else (
+      if pos >= stop then fail "truncated values" [%message column.name];
+      let bit_width = Char.to_int s.[pos] in
+      let indices, _ = Rle_hybrid.decode ~bit_width s ~pos:(pos + 1) ~stop ~len:present in
       Array.map indices ~f:(fun i ->
         if i < 0 || i >= Array.length dictionary
         then fail "dictionary index out of range" [%message column.name (i : int)];
-        dictionary.(i))
-    | Rle when [%equal: M.Physical_type.t option] column.type_ (Some Boolean) ->
-      let len = int32_le page pos in
-      let bits, _ =
-        Rle_hybrid.decode
-          ~bit_width:1
-          page
-          ~pos:(pos + 4)
-          ~stop:(pos + 4 + len)
-          ~len:present
-      in
-      Array.map bits ~f:(fun b -> Value.Bool (b = 1))
-    | encoding ->
-      fail "unsupported encoding" [%message column.name (encoding : M.Encoding.t)]
-  in
+        dictionary.(i)))
+  | Rle when [%equal: M.Physical_type.t option] column.type_ (Some Boolean) ->
+    let len = int32_le s pos in
+    let bits, _ =
+      Rle_hybrid.decode ~bit_width:1 s ~pos:(pos + 4) ~stop:(pos + 4 + len) ~len:present
+    in
+    Array.map bits ~f:(fun b -> Value.Bool (b = 1))
+  | Delta_binary_packed
+    when [%equal: M.Physical_type.t option] column.type_ (Some Int32)
+         || [%equal: M.Physical_type.t option] column.type_ (Some Int64) ->
+    let values, _ = Delta.binary_packed s ~pos ~stop in
+    check_count (Array.map values ~f:(int_of_int64 column))
+  | Delta_length_byte_array ->
+    let values, _ = Delta.length_byte_array s ~pos ~stop in
+    check_count (Array.map values ~f:(fun v -> Value.String v))
+  | Delta_byte_array ->
+    let values, _ = Delta.byte_array s ~pos ~stop in
+    check_count (Array.map values ~f:(fun v -> Value.String v))
+  | Byte_stream_split ->
+    let width =
+      match column.type_, column.type_length with
+      | Some (Int32 | Float), _ -> 4
+      | Some (Int64 | Double), _ -> 8
+      | Some Fixed_len_byte_array, Some k -> k
+      | _ -> fail "BYTE_STREAM_SPLIT on this type" [%message column.name]
+    in
+    let plain = Delta.byte_stream_split s ~pos ~n:present ~width in
+    fst (decode_plain column plain ~pos:0 ~n:present)
+  | encoding ->
+    fail "unsupported encoding" [%message column.name (encoding : M.Encoding.t)]
+;;
+
+(* Spread [values] over the [levels], [Null] where the level is 0. *)
+let with_nulls levels values : Value.t array =
   match levels with
   | None -> values
   | Some levels ->
@@ -253,6 +266,68 @@ let decode_data_page
         incr next;
         v)
       else Value.Null)
+;;
+
+let present ~n = function
+  | None -> n
+  | Some levels -> Array.count levels ~f:(fun l -> l = 1)
+;;
+
+(* A v1 page: levels (length prefixed) and values, compressed together. *)
+let decode_data_page column ~dictionary (header : M.Data_page_header.t) page =
+  let n = header.num_values in
+  let levels, pos =
+    if is_optional column
+    then (
+      let len = int32_le page 0 in
+      let levels, _ = Rle_hybrid.decode ~bit_width:1 page ~pos:4 ~stop:(4 + len) ~len:n in
+      Some levels, 4 + len)
+    else None, 0
+  in
+  decode_values
+    column
+    ~dictionary
+    ~encoding:header.encoding
+    page
+    ~pos
+    ~present:(present ~n levels)
+  |> with_nulls levels
+;;
+
+(* A v2 page: uncompressed levels with their lengths in the header, then the values,
+   compressed or not. *)
+let decode_data_page_v2
+  column
+  ~dictionary
+  ~codec
+  ~uncompressed_page_size
+  (header : M.Data_page_header_v2.t)
+  body
+  =
+  let n = header.num_values in
+  let rl = header.repetition_levels_byte_length
+  and dl = header.definition_levels_byte_length in
+  if rl < 0 || dl < 0 || rl + dl > String.length body
+  then fail "bad level lengths" [%message (rl : int) (dl : int)];
+  let levels =
+    if is_optional column
+    then Some (fst (Rle_hybrid.decode ~bit_width:1 body ~pos:rl ~stop:(rl + dl) ~len:n))
+    else None
+  in
+  let values = String.drop_prefix body (rl + dl) in
+  let values =
+    if header.is_compressed
+    then decompress codec values ~uncompressed_size:(uncompressed_page_size - rl - dl)
+    else values
+  in
+  decode_values
+    column
+    ~dictionary
+    ~encoding:header.encoding
+    values
+    ~pos:0
+    ~present:(present ~n levels)
+  |> with_nulls levels
 ;;
 
 let read_chunk t (column : M.Schema_element.t) (chunk : M.Column_chunk.t) ~num_rows =
@@ -267,6 +342,12 @@ let read_chunk t (column : M.Schema_element.t) (chunk : M.Column_chunk.t) ~num_r
   let filled = ref 0 in
   let dictionary = ref None in
   let pos = ref 0 in
+  let add values =
+    if !filled + Array.length values > num_rows
+    then fail "more values than rows" [%message column.name];
+    Array.blit ~src:values ~src_pos:0 ~dst:out ~dst_pos:!filled ~len:(Array.length values);
+    filled := !filled + Array.length values
+  in
   while !filled < num_rows do
     if !pos >= String.length bytes
     then fail "column chunk ends early" [%message column.name];
@@ -294,17 +375,21 @@ let read_chunk t (column : M.Schema_element.t) (chunk : M.Column_chunk.t) ~num_r
         | Some h -> h
         | None -> fail "data page without a header" [%message column.name]
       in
-      let values = decode_data_page column ~dictionary:!dictionary h (page ()) in
-      if !filled + Array.length values > num_rows
-      then fail "more values than rows" [%message column.name];
-      Array.blit
-        ~src:values
-        ~src_pos:0
-        ~dst:out
-        ~dst_pos:!filled
-        ~len:(Array.length values);
-      filled := !filled + Array.length values
-    | Data_page_v2 -> fail "data page v2 is not supported" [%message column.name]
+      add (decode_data_page column ~dictionary:!dictionary h (page ()))
+    | Data_page_v2 ->
+      let h =
+        match header.data_page_header_v2 with
+        | Some h -> h
+        | None -> fail "data page v2 without a header" [%message column.name]
+      in
+      add
+        (decode_data_page_v2
+           column
+           ~dictionary:!dictionary
+           ~codec:meta.codec
+           ~uncompressed_page_size:header.uncompressed_page_size
+           h
+           body)
     | Index_page -> ()
   done;
   out
