@@ -110,7 +110,9 @@ let rec gen_value ~depth : T.t Quickcheck.Generator.t =
 and gen_struct ~depth =
   let open Quickcheck.Generator.Let_syntax in
   let%map fields =
-    List.gen_with_length 4 (Quickcheck.Generator.tuple2 (Int.gen_incl 1 40) (gen_value ~depth))
+    List.gen_with_length
+      4
+      (Quickcheck.Generator.tuple2 (Int.gen_incl 1 40) (gen_value ~depth))
   in
   let fields =
     List.dedup_and_sort fields ~compare:(fun (a, _) (b, _) -> Int.compare a b)
@@ -119,12 +121,9 @@ and gen_struct ~depth =
 ;;
 
 let%test_unit "read_struct inverts write" =
-  Quickcheck.test
-    (gen_struct ~depth:0)
-    ~sexp_of:T.sexp_of_t
-    ~f:(fun v ->
-      let s = T.to_string v in
-      [%test_result: Sexp.t] (T.sexp_of_t (T.of_string s)) ~expect:(T.sexp_of_t v))
+  Quickcheck.test (gen_struct ~depth:0) ~sexp_of:T.sexp_of_t ~f:(fun v ->
+    let s = T.to_string v in
+    [%test_result: Sexp.t] (T.sexp_of_t (T.of_string s)) ~expect:(T.sexp_of_t v))
 ;;
 
 let%expect_test "large field ids and long lists" =
@@ -135,7 +134,9 @@ let%expect_test "large field ids and long lists" =
       ; 101, T.List (Bool, [ Bool true; Bool false ])
       ]
   in
-  print_s [%sexp (T.sexp_of_t (T.of_string (T.to_string v)) |> Sexp.equal (T.sexp_of_t v) : bool)];
+  print_s
+    [%sexp
+      (T.sexp_of_t (T.of_string (T.to_string v)) |> Sexp.equal (T.sexp_of_t v) : bool)];
   [%expect {| true |}]
 ;;
 
@@ -147,5 +148,12 @@ let%expect_test "malformed input is reported" =
   show "\x18\x05abc";
   show "\x1b\x01\x00";
   show "\x00\x00";
-  [%expect {| |}]
+  [%expect
+    {|
+    (Error ("Thrift_compact: malformed input" (what truncated) (pos 0)))
+    (Error ("Thrift_compact: malformed input" (what "binary length") (pos 2)))
+    (Error
+     ("Thrift_compact: malformed input" (what "unsupported type 11") (pos 1)))
+    (Error ("Thrift_compact: malformed input" (what "trailing bytes") (pos 1)))
+    |}]
 ;;
